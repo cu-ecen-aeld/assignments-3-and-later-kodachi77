@@ -1,6 +1,8 @@
 # aesd-assignments
 This repo contains public starter source code, scripts, and documentation for Advanced Embedded Software Development (ECEN-5713) and Advanced Embedded Linux Development assignments University of Colorado, Boulder.
 
+![assignment-test](https://github.com/cu-ecen-aeld/assignment-1-kodachi77/actions/workflows/github-actions.yml/badge.svg
+
 ## Setting Up Git
 
 Use the instructions at [Setup Git](https://help.github.com/en/articles/set-up-git) to perform initial git setup steps. For AESD you will want to perform these steps inside your Linux host virtual or physical machine, since this is where you will be doing your development work.
@@ -19,7 +21,7 @@ The basis of the automated test implementation for this repository comes from [h
 
 The assignment-autotest directory contains scripts useful for automated testing  Use
 ```
-git submodule init update --recursive
+git submodule update --init --recursive
 ```
 to synchronize after cloning and before starting each assignment, as discussed in the assignment instructions.
 
