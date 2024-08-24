@@ -9,7 +9,7 @@
 
 void report_error(const char* format, ...) {
     va_list args;
-    char buffer[MAX_ERROR_MSG_SIZE];
+    char buffer[MAX_ERROR_MSG_SIZE+7];
 
     // Start processing the arguments
     va_start(args, format);
