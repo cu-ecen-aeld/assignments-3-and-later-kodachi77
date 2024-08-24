@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
 
     // Check if the correct number of arguments is provided
     if (argc != 3) {
-	report_error("Error: invalid number of arguments.");
+	report_error("Invalid number of arguments.");
         fprintf(stderr, "Usage: %s <writefile> <writestr>\n", argv[0]);
         exit(1);
     }
@@ -49,7 +49,7 @@ int main(int argc, char *argv[]) {
     // Attempt to open the file for writing
     FILE *file = fopen(writefile, "w");
     if (file == NULL) {
-        report_error("Could not create or open file %s: %s", writefile, strerror(errno));
+        report_error("Could not create or open file '%s': %s", writefile, strerror(errno));
         exit(1);
     }
 
