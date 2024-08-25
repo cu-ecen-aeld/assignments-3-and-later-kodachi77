@@ -1,4 +1,11 @@
 #include "systemcalls.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <fcntl.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -9,13 +16,26 @@
 */
 bool do_system(const char *cmd)
 {
+    // Check argument correctness
+    if (cmd == NULL) {
+        return false;
+    }
 
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
+    // Call the system() function
+    int ret = system(cmd);
+
+    // Check for errors as described in https://www.man7.org/linux/man-pages/man3/system.3.html
+    // This code made explicit on purpose. We could have done this in one if.
+    if (ret == -1) {
+        // system() itself failed
+        return false;
+    } else if (WIFSIGNALED(ret) && (WTERMSIG (ret) == SIGINT || WTERMSIG (ret) == SIGQUIT)) {
+        // The command was terminated by a signal
+        return false;
+    } else if (WIFEXITED(ret) && WEXITSTATUS(ret)) {
+        // The command exited with a non-zero status
+        return false;
+    }
 
     return true;
 }
@@ -45,23 +65,32 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
 
     va_end(args);
 
-    return true;
+    // Fork the process
+    pid_t pid = fork();
+    if (pid == -1) {
+        // Fork failed
+        return false;
+    } else if (pid == 0) {
+        // Child process: execute the command using execv
+        execv(command[0], command);
+        // If execv returns, it means there was an error. Return non-zero status.
+        exit(1);
+    } else {
+        // Parent process: wait for the child process to complete
+        int status;
+        if (waitpid(pid, &status, 0) == -1) {
+            // waitpid failed
+            return false;
+        }
+
+        // Check if the child process terminated normally
+        return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    }
+
+    return false;
 }
 
 /**
@@ -80,20 +109,49 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
-
-/*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
- *   redirect standard out to a file specified by outputfile.
- *   The rest of the behaviour is same as do_exec()
- *
-*/
 
     va_end(args);
 
-    return true;
+    // Fork the process
+    pid_t pid = fork();
+    if (pid == -1) {
+        // Fork failed
+        return false;
+    } else if (pid == 0) {
+        // Child process: redirect stdout to the output file
+
+        // Open the output file
+        int fd = open(outputfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd < 0) {
+            // Opening file failed
+            exit(1);
+        }
+
+        // Redirect stdout to the file
+        if (dup2(fd, STDOUT_FILENO) < 0) {
+            // Redirecting stdout failed
+            close(fd);
+            exit(1);
+        }
+
+        // Close old file descriptor
+        close(fd);
+
+        // Execute the command using execv
+        execv(command[0], command);
+	// If execv returns this means error happened.
+        exit(1);
+    } else {
+        // Parent process: wait for the child process to complete
+        int status;
+        if (waitpid(pid, &status, 0) == -1) {
+            // waitpid failed
+            return false;
+        }
+
+        // Check if the child process terminated normally
+        return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    }
+
+    return false;
 }
