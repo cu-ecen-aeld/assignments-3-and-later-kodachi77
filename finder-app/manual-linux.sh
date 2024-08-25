@@ -12,7 +12,7 @@ BUSYBOX_VERSION=1_33_1
 FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
 CROSS_COMPILE=aarch64-none-linux-gnu-
-FORCE_CLEAN=
+FORCE_CLEAN=1
 COMPILE_MODULES=
 
 if [ $# -lt 1 ]
@@ -37,21 +37,23 @@ if [ ! -d "${OUTDIR}/linux-stable" ]; then
     # Clone only if the repository does not exist.
     echo "CLONING GIT LINUX STABLE VERSION ${KERNEL_VERSION} IN ${OUTDIR}"
     git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION}
-fi
-
-if [ ! -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]; then
     cd linux-stable
     echo "Checking out version ${KERNEL_VERSION}"
     git checkout ${KERNEL_VERSION}
+else
+    cd linux-stable
+fi
 
+if [ "$FORCE_CLEAN" ] && [ -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]
+then
+    make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mrproper
+fi
+
+if [ ! -e "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" ]; then
     echo "Compiling linux"
 
     # Don't forget to install bison, flex and openssl. Use:
     # sudo apt install flex bison libssl-dev
-
-    if [ "$FORCE_CLEAN" ]; then
-	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mrproper
-    fi
 
     if [ ! -e .config ]; then
 	make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig
