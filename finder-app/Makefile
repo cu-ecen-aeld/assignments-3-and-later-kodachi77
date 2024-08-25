@@ -4,7 +4,7 @@ CC = $(CROSS_COMPILE)gcc
 CFLAGS = -Wall -Wextra -Werror -O2
 LDFLAGS = -s
 LDLIBS =
-TARGET = $(CROSS_COMPILE)writer
+TARGET = writer
 SRCS = writer.c
 OBJS = $(SRCS:.c=.o)
 
