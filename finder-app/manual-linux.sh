@@ -12,7 +12,8 @@ BUSYBOX_VERSION=1_33_1
 FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
 CROSS_COMPILE=aarch64-none-linux-gnu-
-FORCE_CLEAN=
+# Make FORCE_CLEAN empty in order to avoid cleaning already built sources
+FORCE_CLEAN=1
 COMPILE_MODULES=
 
 if [ $# -lt 1 ]
@@ -159,6 +160,8 @@ make CROSS_COMPILE=$CROSS_COMPILE
 # Copy the finder related scripts and executables to the /home directory on the target rootfs
 cp writer finder.sh finder-test.sh autorun-qemu.sh "${OUTDIR}/rootfs/home/"
 
+# These lines are here because finder-test.sh script references ../conf directory and we have
+# symbolic link to it in the CWD.
 conf_relative_path=$(realpath --relative-to=$(realpath .) $(readlink -f conf))
 cp -r $conf_relative_path "${OUTDIR}/rootfs/home/${conf_relative_path}"
 cp -a conf "${OUTDIR}/rootfs/home/"
@@ -169,6 +172,7 @@ sudo chown -R root:root "${OUTDIR}/rootfs"
 # Create initramfs.cpio.gz
 cd "${OUTDIR}/rootfs"
 if [ -e "${OUTDIR}/initramfs.cpio.gz" ]; then
+    # Avoid y/n question
     rm -f "${OUTDIR}/initramfs.cpio.gz"
 fi
 find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
