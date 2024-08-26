@@ -49,6 +49,13 @@ then
 	fi
 fi
 
+
+if [ -e Makefile ]; then
+    # always recompile for host
+    make clean
+    make
+fi
+
 for i in $( seq 1 $NUMFILES)
 do
 	./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
@@ -58,6 +65,12 @@ OUTPUTSTRING=$(./finder.sh "$WRITEDIR" "$WRITESTR")
 
 # remove temporary directories
 rm -rf /tmp/aeld-data
+
+if [ -e Makefile ]; then
+    # cleanup to avoid problems during cross-compilation
+    make clean
+fi
+
 
 set +e
 echo ${OUTPUTSTRING} | grep "${MATCHSTR}"

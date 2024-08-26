@@ -12,7 +12,7 @@ BUSYBOX_VERSION=1_33_1
 FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
 CROSS_COMPILE=aarch64-none-linux-gnu-
-FORCE_CLEAN=1
+FORCE_CLEAN=
 COMPILE_MODULES=
 
 if [ $# -lt 1 ]
@@ -141,6 +141,16 @@ fi
 
 # Clean and build the writer utility
 cd "$FINDER_APP_DIR"
+
+# Check if writer was compiled for host system
+if [ -e writer ]; then
+    host_arch=$(uname -m)
+    if file writer | grep -Eq "($host_arch|${host_arch//_/-})"; then
+	echo "Found writer that was compiled for host system. Cleaning up."
+	make clean
+    fi
+fi
+
 if [ "$FORCE_CLEAN" ]; then
     make CROSS_COMPILE=$CROSS_COMPILE clean
 fi
