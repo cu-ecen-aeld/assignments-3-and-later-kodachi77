@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Check if exactly two arguments are passed
 if [ "$#" -ne 2 ]; then
@@ -11,6 +11,9 @@ fi
 filesdir=$1
 searchstr=$2
 
+# Append trailing slash to make sure find works correctly if something like /bin is supplied.
+filesdir="${filesdir%/}/"
+
 # Check if filesdir is a valid directory
 if [ ! -d "$filesdir" ]; then
     echo "Error: Directory '$filesdir' does not exist."
@@ -18,9 +21,9 @@ if [ ! -d "$filesdir" ]; then
 fi
 
 # Count the number of files in the directory and its subdirectories
-file_count=$(find "$filesdir" -type f | wc -l)
+file_count=$(find "$filesdir" -type f 2>/dev/null | wc -l)
 
-# Count the number of matching lines
+# Count the number of matching lines. -r to match find behavior.
 matching_lines_count=$(grep -r "$searchstr" "$filesdir" 2>/dev/null | wc -l)
 
 # Print the results
