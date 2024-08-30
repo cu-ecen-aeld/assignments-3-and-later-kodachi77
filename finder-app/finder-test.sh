@@ -8,11 +8,12 @@ set -u
 NUMFILES=10
 WRITESTR=AELD_IS_FUN
 WRITEDIR=/tmp/aeld-data
+script_dir=$(dirname $0)
 
 if [ -d /etc/finder-app/conf ]; then
     conf_dir=/etc/finder-app/conf
 else
-    conf_dir=./conf
+    conf_dir="${script_dir}/conf"
 fi
 username=$(cat "${conf_dir}/username.txt")
 
@@ -56,18 +57,18 @@ then
 fi
 
 
-if [ -e Makefile ]; then
+if [ -e "${script_dir}/Makefile" ]; then
     # always recompile for host
-    make clean
-    make
+    make -C "$script_dir" clean
+    make -C "$script_dir"
 fi
 
 for i in $( seq 1 $NUMFILES)
 do
-    ./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
+    "${script_dir}/writer" "$WRITEDIR/${username}$i.txt" "$WRITESTR"
 done
 
-OUTPUTSTRING=$(./finder.sh "$WRITEDIR" "$WRITESTR")
+OUTPUTSTRING=$("${script_dir}/finder.sh" "$WRITEDIR" "$WRITESTR")
 if echo "$assignment" | grep -q "assignment4"; then
     echo "$OUTPUTSTRING" > /tmp/assignment4-result.txt
 fi
@@ -75,9 +76,9 @@ fi
 # remove temporary directories
 rm -rf /tmp/aeld-data
 
-if [ -e Makefile ]; then
+if [ -e "${script_dir}/Makefile" ]; then
     # cleanup to avoid problems during cross-compilation
-    make clean
+    make -C "$script_dir" clean
 fi
 
 
