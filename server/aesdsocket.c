@@ -142,6 +142,12 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+    const int enable = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
+        report_error("Failed to set SO_REUSEADDR socket option: %s", strerror(errno));
+	return -1;
+    }
+
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
 
