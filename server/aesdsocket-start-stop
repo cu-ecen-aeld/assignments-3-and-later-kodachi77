@@ -4,11 +4,10 @@
 DAEMON_NAME="aesdsocket"
 
 # Path to the executable
-if [ -e "usr/bin/${DAEMON_NAME}" ]; then
-    DAEMON_PATH="usr/bin/${DAEMON_NAME}"
+if [ -e "/usr/bin/${DAEMON_NAME}" ]; then
+    DAEMON_PATH="/usr/bin/${DAEMON_NAME}"
 else
     DAEMON_PATH="$(realpath $(dirname $0)/${DAEMON_NAME})"
-    echo "$DAEMON_PATH"
 fi
 
 # Daemon options
@@ -22,19 +21,55 @@ LOGFILE="/var/log/$DAEMON_NAME.log"
 
 if [ -e /lib/lsb/init-functions ]; then
     . /lib/lsb/init-functions
+else
+
+    # Buildroot doesn't have lsb-base so we will emulate it
+
+    log_daemon_msg() {
+        echo "$1"
+    }
+
+    log_end_msg() {
+        if [ "$1" -eq 0 ]; then
+            echo " [ OK ]"
+        else
+            echo " [ FAIL ]"
+        fi
+    }
+
+    status_of_proc() {
+        if [ ! -f "$2" ]; then
+            echo "$3 is not running (no PID file found)"
+            return 3  # Status 3 indicates the process is not running
+        fi
+
+        PID=$(cat "$2")
+        if [ -z "$PID" ]; then
+            echo "$3 is not running (empty PID file)"
+            return 3  # Process not running
+        fi
+
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "$3 is running (PID: $PID)"
+            return 0  # Process is running
+	else
+            echo "$3 is not running (stale PID file)"
+            return 1  # Process is not running, but PID file exists (stale)
+	fi
+    }
 fi
 
 case "$1" in
     start)
         log_daemon_msg "Starting $DAEMON_NAME..."
         start-stop-daemon --start --quiet --background --exec $DAEMON_PATH -- $DAEMON_OPTS >> $LOGFILE 2>&1
-	# since we're forking our process we need to capture pid of the child
-	sleep 1
-        DAEMON_PID=$(ps -eo pid,cmd | grep -E "$DAEMON_PATH $DAEMON_OPTS" | grep -v grep | sed -E 's/^[[:space:]]*([0-9]+).*/\1/')
+        # since we're forking our process we need to capture pid of the child
+        sleep 1
+        DAEMON_PID=$(ps -e -o pid,args | grep -E "$DAEMON_PATH $DAEMON_OPTS" | grep -v grep | sed -E 's/^[[:space:]]*([0-9]+).*/\1/')
         echo $DAEMON_PID > $PIDFILE
         log_end_msg $?
         ;;
-    
+
     stop)
         log_daemon_msg "Stopping $DAEMON_NAME..."
         start-stop-daemon --stop --quiet --pidfile $PIDFILE --retry=TERM/3/KILL/5
