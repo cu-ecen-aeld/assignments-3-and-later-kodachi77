@@ -27,10 +27,8 @@ $(TARGET): $(OBJS)
 clean:
 	rm -f $(TARGET) $(OBJS)
 
-# Install the writer app and scripts to /bin
+# Install the writer app and scripts to /usr//bin
 install: $(TARGET)
 	$(INSTALL) -m 0755 $(TARGET) $(INSTALL_DIR)
-	$(INSTALL) -m 0755 finder.sh $(INSTALL_DIR)
-	$(INSTALL) -m 0755 finder-test.sh $(INSTALL_DIR)
 
 .PHONY: all clean install
