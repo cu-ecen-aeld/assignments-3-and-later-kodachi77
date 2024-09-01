@@ -1,0 +1,59 @@
+#!/bin/sh
+
+# Daemon name
+DAEMON_NAME="aesdsocket"
+
+# Path to the executable
+if [ -e "usr/bin/${DAEMON_NAME}" ]; then
+    DAEMON_PATH="usr/bin/${DAEMON_NAME}"
+else
+    DAEMON_PATH="$(realpath $(dirname $0)/${DAEMON_NAME})"
+    echo "$DAEMON_PATH"
+fi
+
+# Daemon options
+DAEMON_OPTS="-d"
+
+# PID file
+PIDFILE="/var/run/$DAEMON_NAME.pid"
+
+# Log file
+LOGFILE="/var/log/$DAEMON_NAME.log"
+
+if [ -e /lib/lsb/init-functions ]; then
+    . /lib/lsb/init-functions
+fi
+
+case "$1" in
+    start)
+        log_daemon_msg "Starting $DAEMON_NAME..."
+        start-stop-daemon --start --quiet --background --exec $DAEMON_PATH -- $DAEMON_OPTS >> $LOGFILE 2>&1
+	# since we're forking our process we need to capture pid of the child
+	sleep 1
+        DAEMON_PID=$(ps -eo pid,cmd | grep -E "$DAEMON_PATH $DAEMON_OPTS" | grep -v grep | sed -E 's/^[[:space:]]*([0-9]+).*/\1/')
+        echo $DAEMON_PID > $PIDFILE
+        log_end_msg $?
+        ;;
+    
+    stop)
+        log_daemon_msg "Stopping $DAEMON_NAME..."
+        start-stop-daemon --stop --quiet --pidfile $PIDFILE --retry=TERM/3/KILL/5
+        log_end_msg $?
+        ;;
+
+    restart)
+        $0 stop
+        $0 start
+        ;;
+
+    status)
+        status_of_proc -p $PIDFILE $DAEMON_NAME && exit 0 || exit $?
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+
+exit 0
