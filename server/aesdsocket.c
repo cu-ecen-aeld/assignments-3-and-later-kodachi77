@@ -159,10 +159,10 @@ int send_data_to_client(int client_sockfd)
     while (fgets(buffer, NET_BUFFER_SIZE, file) != NULL)
     {
         // Check if the line starts with "timestamp"
-        if (strncmp(buffer, "timestamp", 9) == 0)
-        {
-            continue; // Skip this line
-        }
+        //if (strncmp(buffer, "timestamp", 9) == 0)
+        //{
+        //    continue; // Skip this line
+        //}
 
         size_t line_length = strlen(buffer);
         size_t total_sent = 0;
@@ -285,7 +285,7 @@ int create_timer()
         return -1;
     }
 
-    its.it_value.tv_sec = 0; // Initial expiration after 0 seconds
+    its.it_value.tv_sec = 10; // Initial expiration after 0 seconds
     its.it_value.tv_nsec = 0;
     its.it_interval.tv_sec = 10; // Timer interval of 10 second
     its.it_interval.tv_nsec = 0;
