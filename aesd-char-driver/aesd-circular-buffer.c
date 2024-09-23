@@ -29,9 +29,30 @@
 struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
             size_t char_offset, size_t *entry_offset_byte_rtn )
 {
-    /**
-    * TODO: implement per description
-    */
+    size_t cumulative_size = 0;
+    size_t current_offset = buffer->out_offs;
+    size_t entry_index = 0;
+
+    // Iterate through the buffer entries
+    while (entry_index < buffer->count) {
+        struct aesd_buffer_entry *entry = &buffer->entry[current_offset];
+
+        // Check if the char_offset falls within the current entry
+        if (cumulative_size + entry->size > char_offset) {
+            // Calculate the offset within the entry
+            *entry_offset_byte_rtn = char_offset - cumulative_size;
+            return entry;
+        }
+
+        // Update the cumulative size
+        cumulative_size += entry->size;
+
+        // Move to the next entry
+        current_offset = (current_offset + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        entry_index++;
+    }
+
+    // If we reach here, the char_offset is not available in the buffer
     return NULL;
 }
 
@@ -44,9 +65,24 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 */
 void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    /**
-    * TODO: implement per description
-    */
+    // Add the new entry at the in_offs position
+    memcpy(&buffer->entry[buffer->in_offs], add_entry, sizeof(struct aesd_buffer_entry));
+
+    // Advance in_offs to the next position
+    buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;    
+
+    // Check if the buffer is full
+    if (buffer->count == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
+        buffer->full = true;
+    } else {
+        // Buffer is not full, increment the count
+        buffer->count++;
+    }
+
+    if(buffer->full) {
+        // Buffer is full, advance out_offs to overwrite the oldest entry
+        buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    }
 }
 
 /**
@@ -54,5 +90,5 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
 */
 void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 {
-    memset(buffer,0,sizeof(struct aesd_circular_buffer));
+    memset(buffer, 0, sizeof(struct aesd_circular_buffer));
 }
