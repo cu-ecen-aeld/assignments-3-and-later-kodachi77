@@ -28,19 +28,15 @@ void log_error(const char *format, ...);
 void log_signal(int signal);
 void log_client_connection(struct sockaddr_in* client_addr);
 
-int create_timer();
 int create_file();
 int create_detached_thread();
 
 void handle_signal(int signal);
-void handle_timer(union sigval sv);
 void* handle_client(void *arg);
-int handle_client_non_blocking(client_data_t* client_sockfd);
 
 int listen_socket();
 
 int send_data_to_client(int client_sockfd);
-int send_data_to_client_non_blocking(int client_sockfd);
 
 void write_data_to_file(const char* buffer);
 

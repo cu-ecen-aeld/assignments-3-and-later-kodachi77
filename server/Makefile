@@ -6,7 +6,7 @@ CFLAGS ?= -Wall -Wextra -Werror -O2 -Wno-maybe-uninitialized
 LDFLAGS ?= -g -rdynamic
 LDLIBS ?= -pthread -lrt
 TARGET = aesdsocket
-SRCS = aesdsocket.c hashmap.c thread_pool.c
+SRCS = aesdsocket.c
 OBJS = $(SRCS:.c=.o)
 
 # Installation directory

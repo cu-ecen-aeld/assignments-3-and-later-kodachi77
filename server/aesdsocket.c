@@ -11,7 +11,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/sendfile.h>
 #include <syslog.h>
 #include <signal.h>
 #include <fcntl.h>
@@ -19,37 +18,27 @@
 #include <sys/epoll.h>
 
 #include "aesdsocket.h"
-#include "hashmap.h"
-#include "thread_pool.h"
+
+#define USE_AESDCHAR_DRIVER 1
 
 #define PORT 9000
 #define BACKLOG 16
-#define NET_BUFFER_SIZE 1024
-#define MSG_BUFFER_SIZE 1024
+#define NET_BUFFER_SIZE 2048
+#define MSG_BUFFER_SIZE 2048
+
+#if !USE_AESDCHAR_DRIVER
 #define FILE_PATH "/var/tmp/aesdsocketdata"
-#define INVALID_TIMER (timer_t)(-1)
-#define MAX_EVENTS 512
+#else
+#define FILE_PATH "/dev/aesdchar"
+#endif
 
 // BACKGROUND:
-// Initially I implemented this assignment using threads. To make things simpler I used detached threads, because they are as good as joinable one.
-// You just need to free resources correctly. This implementation was ok, but considering that we're here using single ever-increasing file
-// (and both disk and network access is extremely slow) my guess was that if I used event loop (epoll in my case) I can get similar performance
-// with a single threaded app. So I implemented it as a second option and got slightly better performance than in the threaded case.
-// To test things - I also added thread pool and offloaded sending file contents over the wire (using sendfile) to threads.
-// I create JMeter test to test these scenarios. See .jmx file and a performance comparison image.
-
-//#define JMETER_LOAD_TEST 1
-
-#define EPOLL_LOOP 1
-// #define EPOLL_LOOP_MULTI_THREADED 1
-
-#ifdef EPOLL_LOOP_MULTI_THREADED
-#define EPOLL_LOOP 1
-#endif
-
-#ifndef EPOLL_LOOP
-#define CLASSIC_MULTI_THREADED 1
-#endif
+// 3 different implementations were removed from this version (assignment 8). They were:
+// - classic threaded
+// - epoll single-treaded
+// - epoll with thread pool
+// Refer to older file versions if you are curious. No more time in this one either.
+// For this assignment we will use classic threaded implementation.
 
 #define EXIT()         \
     do                 \
@@ -69,14 +58,10 @@ int sockfd = -1;
 FILE *file = NULL;
 int daemon_mode = 0;
 int child_process = 0;
+#if !USE_AESDCHAR_DRIVER
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
-timer_t timer_id = INVALID_TIMER;
-volatile sig_atomic_t signal_received = 0;
-
-#ifdef EPOLL_LOOP
-struct hashmap *packets_map = NULL;
-int epoll_fd = -1;
 #endif
+volatile sig_atomic_t signal_received = 0;
 
 static inline int is_daemon()
 {
@@ -160,19 +145,6 @@ void handle_signal(int signal)
     }
 }
 
-void handle_timer(union sigval sv)
-{
-    (void)sv;
-    time_t now = time(NULL);
-    struct tm *tm_info = localtime(&now);
-    char timestamp[128];
-    strftime(timestamp, sizeof(timestamp), "timestamp: %a, %d %b %Y %H:%M:%S %z\n", tm_info);
-
-    pthread_mutex_lock(&file_mutex);
-    write_data_to_file(timestamp);
-    pthread_mutex_unlock(&file_mutex);
-}
-
 void *handle_client(void *arg)
 {
     thread_info_t *thread_info = (thread_info_t *)arg;
@@ -185,45 +157,25 @@ void *handle_client(void *arg)
     {
         buffer[n] = '\0';
 
-#ifdef JMETER_LOAD_TEST
-        if (strncmp(buffer, "RESET", 5) == 0)
         {
-            int fd = fileno(file);
-            if (fd < 0)
-            {
-                log_error("Failed to get file descriptor: %s", strerror(errno));
-                goto thread_exit;
-            }
+#if !USE_AESDCHAR_DRIVER
             pthread_mutex_lock(&file_mutex);
-            int ret = ftruncate(fd, 0);
-            if (ret < 0)
-            {
-                log_error("Failed to truncate file: %s", strerror(errno));
-            }
-            pthread_mutex_unlock(&file_mutex);
-
-            const char *response = "OK\n";
-            if (send(client_sockfd, response, strlen(response), 0) == -1)
-            {
-                log_error("Failed to send response to client: %s", strerror(errno));
-                goto thread_exit;
-            }
-
-            goto thread_exit;
-        }
 #endif
-
-        {
-            pthread_mutex_lock(&file_mutex);
             write_data_to_file(buffer);
-            pthread_mutex_unlock(&file_mutex);
+#if !USE_AESDCHAR_DRIVER
+	    pthread_mutex_unlock(&file_mutex);
+#endif
         }
 
         if (strchr(buffer, '\n'))
         {
+#if !USE_AESDCHAR_DRIVER
             pthread_mutex_lock(&file_mutex);
-            send_data_to_client(client_sockfd);
+#endif
+	    send_data_to_client(client_sockfd);
+#if !USE_AESDCHAR_DRIVER
             pthread_mutex_unlock(&file_mutex);
+#endif
 	    goto thread_exit;
         }
     }
@@ -239,121 +191,25 @@ thread_exit:
     return NULL;
 }
 
-// function resurns 0 on success, -1 on error, -2 if peer closed the connection, -3 on reset
-// if it returns 0 - we had data, but no more data is coming, if >0 then more data is coming
-int handle_client_non_blocking(client_data_t *data)
-{
-    int client_sockfd = data->client_sockfd;
-    char buffer[NET_BUFFER_SIZE] = {0};
-    ssize_t count;
-    while (1)
-    {
-        count = read(client_sockfd, buffer, sizeof(buffer));
-        if (count == -1)
-        {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-            {
-                // If the socket is non-blocking and we would block, wait for it to be ready
-                continue;
-            }
-            else
-            {
-                log_error("Failed to read data: %s", strerror(errno));
-                return -1;
-            }
-        }
-        else if (count == 0)
-        {
-            // Peer closed the connection
-            return -2; // was 0
-        }
-        else
-        {
-#ifdef JMETER_LOAD_TEST
-            if (strncmp(buffer, "RESET", 5) == 0)
-            {
-                int fd = fileno(file);
-                if (fd < 0)
-                {
-                    log_error("Failed to get file descriptor: %s", strerror(errno));
-                    return -1;
-                }
-                pthread_mutex_lock(&file_mutex);
-                int ret = ftruncate(fd, 0);
-                if (ret < 0)
-                {
-                    log_error("Failed to truncate file: %s", strerror(errno));
-                }
-                pthread_mutex_unlock(&file_mutex);
-
-                const char *response = "OK\n";
-                if (send(client_sockfd, response, strlen(response), 0) == -1)
-                {
-                    log_error("Failed to send response to client: %s", strerror(errno));
-                    return -1;
-                }
-
-                return -3;
-            }
-#endif
-
-            if (strchr(buffer, '\n'))
-            {
-                pthread_mutex_lock(&file_mutex);
-                if (data->count)
-                {
-                    write_data_to_file(data->buffer);
-                }
-                write_data_to_file(buffer);
-
-                pthread_mutex_unlock(&file_mutex);
-
-#ifdef EPOLL_LOOP_MULTI_THREADED
-                return 0;
-#else
-                return send_data_to_client_non_blocking(client_sockfd);
-#endif
-            }
-            else
-            {
-                data->buffer = realloc(data->buffer, data->count + count);
-                if (!data->buffer)
-                {
-                    log_error("Failed to allocate memory: %s", strerror(errno));
-                    return -1;
-                }
-                memcpy(data->buffer + data->count, buffer, count);
-                data->count += count;
-
-                return count;
-            }
-        }
-    }
-    return -1;
-}
-
 void cleanup_resources()
 {
     if (sockfd >= 0)
     {
         close(sockfd);
     }
-
+#if !USE_AESDCHAR_DRIVER
     pthread_mutex_lock(&file_mutex);
+#endif
     if (file)
     {
         fclose(file);
         file = NULL;
     }
+#if !USE_AESDCHAR_DRIVER
     pthread_mutex_unlock(&file_mutex);
 
     pthread_mutex_destroy(&file_mutex);
-
-    if (timer_id != INVALID_TIMER)
-    {
-        timer_delete(timer_id);
-    }
-
+#endif
     if (signal_received == SIGINT || signal_received == SIGTERM)
     {
         remove(FILE_PATH);
@@ -368,11 +224,13 @@ int send_data_to_client(int client_sockfd)
 
     fseek(file, 0, SEEK_SET);
 
-    char buffer[NET_BUFFER_SIZE];
+    char buffer[NET_BUFFER_SIZE] = {0};
     int result = 0;
 
+printf("1\n");
     while (fgets(buffer, NET_BUFFER_SIZE, file) != NULL)
     {
+printf("2\n");
         size_t line_length = strlen(buffer);
         size_t total_sent = 0;
         while (total_sent < line_length)
@@ -394,54 +252,8 @@ int send_data_to_client(int client_sockfd)
             break;
         }
     }
-
+printf("3\n");
     fseek(file, 0, SEEK_END);
-
-    return result;
-}
-
-int send_data_to_client_non_blocking(int client_sockfd)
-{
-    assert(client_sockfd >= 0);
-    if (client_sockfd < 0)
-        return -1;
-
-    int file_fd = fileno(file);
-    if (file_fd < 0)
-    {
-        log_error("Failed to get file descriptor: %s.", strerror(errno));
-        return -1;
-    }
-
-    // Get the file size using fstat
-    struct stat file_stat;
-    if (fstat(file_fd, &file_stat) == -1)
-    {
-        log_error("Failed to get file status: %s", strerror(errno));
-        return -1;
-    }
-
-    off_t offset = 0;
-    int result = 0;
-
-    while (offset < file_stat.st_size)
-    {
-        ssize_t sent = sendfile(client_sockfd, file_fd, &offset, file_stat.st_size);
-        if (sent == -1)
-        {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-            {
-                // If the socket is non-blocking and we would block, wait for it to be ready
-                continue;
-            }
-            else
-            {
-                log_error("Failed to send file: %s", strerror(errno));
-                result = -1;
-                break;
-            }
-        }
-    }
 
     return result;
 }
@@ -455,39 +267,6 @@ void write_data_to_file(const char *buffer)
 
     fputs(buffer, file);
     fflush(file);
-}
-
-int create_timer()
-{
-    struct sigevent sev;
-    struct itimerspec its;
-
-    // Set up the signal event to use a thread
-    sev.sigev_notify = SIGEV_THREAD;          // Notify via a thread
-    sev.sigev_value.sival_ptr = &timer_id;    // Can pass argument to thread function
-    sev.sigev_notify_function = handle_timer; // Function to run when timer expires
-    sev.sigev_notify_attributes = NULL;       // Use default thread attributes
-
-    // Create the timer
-    if (timer_create(CLOCK_REALTIME, &sev, &timer_id) == -1)
-    {
-        log_error("Failed to create timer: %s.", strerror(errno));
-        return -1;
-    }
-
-    its.it_value.tv_sec = 10; // Initial expiration after 10 seconds
-    its.it_value.tv_nsec = 0;
-    its.it_interval.tv_sec = 10; // Timer interval of 10 second
-    its.it_interval.tv_nsec = 0;
-
-    // Start the timer
-    if (timer_settime(timer_id, 0, &its, NULL) == -1)
-    {
-        log_error("Failed to start timer: %s.", strerror(errno));
-        return -1;
-    }
-
-    return 0;
 }
 
 int run_daemon()
@@ -632,8 +411,8 @@ int create_file()
         file = NULL;
         return -1;
     }
-
     file = fopen(FILE_PATH, "a+");
+
     if (!file)
     {
         log_error("Failed to open file: %s", strerror(errno));
@@ -699,39 +478,6 @@ int make_socket_non_blocking(int sockfd)
     return 0;
 }
 
-#ifdef EPOLL_LOOP
-
-static size_t hash_fn(long key, void *ctx)
-{
-    (void)ctx;
-    return key;
-}
-static bool equal_fn(long key1, long key2, void *ctx)
-{
-    (void)ctx;
-    return key1 == key2;
-}
-
-static void unregister_client_data(client_data_t *data)
-{
-    int client_sockfd = data->client_sockfd;
-    hashmap__delete(packets_map, client_sockfd, NULL, NULL);
-    free(data->buffer);
-    free(data);
-
-    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_sockfd, NULL);
-    close(client_sockfd);
-}
-
-void handle_client_non_blocking_task(void *arg)
-{
-    client_data_t *data = (client_data_t *)arg;
-    send_data_to_client_non_blocking(data->client_sockfd);
-    unregister_client_data(data);
-}
-
-#endif
-
 int main(int argc, char *argv[])
 {
     if (argc == 2 && strcmp(argv[1], "-d") == 0)
@@ -752,12 +498,11 @@ int main(int argc, char *argv[])
         EXIT();
     }
 
-    if (create_file() < 0 || create_timer() < 0 || listen_socket() < 0)
+    if (create_file() < 0 || listen_socket() < 0)
     {
         EXIT();
     }
 
-#if CLASSIC_MULTI_THREADED
     while (!signal_received)
     {
         struct sockaddr_in client_addr;
@@ -785,172 +530,4 @@ app_exit:
 
     cleanup_resources();
     return signal_received ? -1 : 0;
-
-#endif
-
-#ifdef EPOLL_LOOP
-
-#ifdef EPOLL_LOOP_MULTI_THREADED
-    long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
-
-    if (num_cores == -1)
-    {
-        num_cores = 4;
-    }
-    threadpool thread_pool = thpool_init(num_cores);
-    if (!thread_pool)
-    {
-        log_error("Failed to create thread pool.");
-        EXIT();
-    }
-#endif
-
-    packets_map = hashmap__new(hash_fn, equal_fn, NULL);
-    if (!packets_map)
-    {
-        log_error("Failed to create hashmap.");
-        EXIT();
-    }
-
-    epoll_fd = epoll_create1(0);
-    if (epoll_fd < 0)
-    {
-        log_error("Failed to create epoll.");
-        EXIT();
-    }
-
-    struct epoll_event event = {0}, events[MAX_EVENTS] = {0};
-    event.events = EPOLLIN; // Watch for incoming connections or data
-    event.data.fd = sockfd;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sockfd, &event);
-
-    // Event loop for handling incoming connections and data
-    while (!signal_received)
-    {
-        int num_fds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-        for (int i = 0; i < num_fds; i++)
-        {
-            if (events[i].data.fd == sockfd)
-            {
-                // accept a new connection
-                struct sockaddr_in client_addr;
-                socklen_t client_len = sizeof(client_addr);
-                int client_sockfd = accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
-                if (client_sockfd < 0)
-                {
-                    if (errno == EINTR && signal_received)
-                    {
-                        EXIT();
-                    }
-                    log_error("Failed to accept connection: %s", strerror(errno));
-                    continue;
-                }
-
-                log_client_connection(&client_addr);
-
-                if (make_socket_non_blocking(client_sockfd) < 0)
-                {
-                    close(client_sockfd);
-                    continue;
-                }
-
-                // Add client socket to epoll monitoring
-                event.events = EPOLLIN;
-                event.data.fd = client_sockfd;
-                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_sockfd, &event);
-            }
-            else
-            {
-                if (events[i].events & EPOLLIN)
-                {
-                    client_data_t *data = NULL;
-                    if (!hashmap__find(packets_map, events[i].data.fd, &data))
-                    {
-                        data = malloc(sizeof(client_data_t));
-                        if (!data)
-                        {
-                            log_error("Failed to allocate memory: %s", strerror(errno));
-                            continue;
-                        }
-                        data->client_sockfd = events[i].data.fd;
-                        data->buffer = NULL;
-                        data->count = 0;
-
-                        hashmap__add(packets_map, events[i].data.fd, (void *)data);
-                    }
-                    // Handle data from existing clients
-                    int ret = handle_client_non_blocking(data);
-                    if (ret > 0)
-                    {
-                        // more data is coming
-                    }
-                    else if (ret == 0)
-                    {
-#ifndef EPOLL_LOOP_MULTI_THREADED
-                        // no more data, in single threaded mode we can unregister client data here
-                        unregister_client_data(data);
-#endif
-                    }
-                    else if (ret < 0)
-                    {
-                        // error
-                        unregister_client_data(data);
-                    }
-#ifdef EPOLL_LOOP_MULTI_THREADED
-                    if (ret >= 0 && thpool_add_work(thread_pool, handle_client_non_blocking_task, (void *)data) != 0)
-                    {
-                        log_error("Failed to add task to a thread pool.");
-                        continue;
-                    }
-#endif
-                }
-
-                if (events[i].events & (EPOLLERR | EPOLLHUP))
-                {
-                    client_data_t *data = NULL;
-                    if (hashmap_find(packets_map, events[i].data.fd, (void *)data))
-                    {
-                        unregister_client_data(data);
-                    }
-                    else
-                    {
-                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, NULL);
-                        close(events[i].data.fd);
-                    }
-                }
-            }
-        }
-    }
-
-    client_data_t *data;
-    struct hashmap_entry *cur, *tmp;
-    size_t bkt;
-
-app_exit:
-    if(epoll_fd >= 0)
-    {
-        close(epoll_fd);
-    }
-
-#ifdef EPOLL_LOOP_MULTI_THREADED
-    if(thread_pool)
-    {
-        thpool_wait(thread_pool);
-        thpool_destroy(thread_pool);
-    }
-#endif
-    if(packets_map)
-    {
-        hashmap__for_each_entry_safe(packets_map, cur, tmp, bkt)
-        {
-            data = (client_data_t *)cur->pvalue;
-            unregister_client_data(data);
-        }
-        hashmap__free(packets_map);
-    }
-
-    cleanup_resources();
-    return signal_received ? -1 : 0;
-
-#endif // EPOLL_LOOP
 }
