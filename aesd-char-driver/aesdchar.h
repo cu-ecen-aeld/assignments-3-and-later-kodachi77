@@ -8,27 +8,79 @@
 #ifndef AESD_CHAR_DRIVER_AESDCHAR_H_
 #define AESD_CHAR_DRIVER_AESDCHAR_H_
 
-#define AESD_DEBUG 1  //Remove comment on this line to enable debug
+#include <linux/mutex.h>
+#include <linux/cdev.h>
+
+
+#include "aesd-circular-buffer.h"
+
+#ifdef __KERNEL__
+#include <linux/ratelimit.h>
+
+//#define USE_FTRACE_BUFFER
+#undef USE_FTRACE_BUFFER
+
+#ifdef USE_FTRACE_BUFFER
+#define DBGPRINT(string, args...)                                       \
+    trace_printk(string, ##args)
+#else
+#define DBGPRINT(string, args...) do {                                  \
+    int USE_RATELIMITING = 0;                                           \
+    if (USE_RATELIMITING) {                                             \
+	pr_info_ratelimited(string, ##args);                            \
+    }                                                                   \
+    else                                                                \
+	pr_info(string, ##args);                                        \
+} while (0)
+#endif
+#endif
+
+#define AESD_DEBUG 1  // Remove comment on this line to enable debug
 
 #undef PDEBUG             /* undef it, just in case */
 #ifdef AESD_DEBUG
 #  ifdef __KERNEL__
      /* This one if debugging is on, and kernel space */
-#    define PDEBUG(fmt, args...) printk( KERN_DEBUG "aesdchar: " fmt, ## args)
+#    define PDEBUG(fmt, args...) do { \
+	DBGPRINT( "aesdchar:%s:%d: " fmt, __func__, __LINE__, ##args); \
+} while(0)
 #  else
      /* This one for user space */
-#    define PDEBUG(fmt, args...) fprintf(stderr, fmt, ## args)
+#define PDEBUG(string, args...) do {                                       \
+    fprintf(stderr, "aesdchar:%s:%d: " fmt, __func__, __LINE__, ##args);     \
+} while (0)
 #  endif
 #else
 #  define PDEBUG(fmt, args...) /* not debugging: nothing */
 #endif
 
+#ifdef __KERNEL__
+#define assert(expr) do {                               \
+if (!(expr)) {                                          \
+    pr_warn("*** ASSERT [%s] failed! : aesdchar:%s:%s:%d ***\n", \
+    #expr, __FILE__, __func__, __LINE__);               \
+}                                                       \
+} while (0)
+#endif
+
+#ifdef __KERNEL__
+#ifdef AESD_DEBUG
+#define PHEXDUMP(from_addr, len) do {                                    \
+    print_hex_dump_bytes("aesdchar: ", DUMP_PREFIX_ADDRESS, from_addr, len);     \
+} while (0)
+#else
+#define PHEXDUMP(from_addr, len)
+#endif
+#else
+#define PHEXDUMP(from_addr, len)
+#endif
+
+
 struct aesd_dev
 {
-    /**
-     * TODO: Add structure(s) and locks needed to complete assignment requirements
-     */
-    struct cdev cdev;     /* Char device structure      */
+     struct mutex lock;
+     struct aesd_circular_buffer buffer;
+     struct cdev cdev;     /* Char device structure      */
 };
 
 

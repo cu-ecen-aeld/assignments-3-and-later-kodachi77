@@ -16,6 +16,9 @@
 #include <stdbool.h>
 #endif
 
+// As a side note: non-power-of-2 length is significantly slower because it requires
+// modulo operator instead of much faster bitwise-AND for determining occupancy or
+// remaining capacity of the buffer.
 #define AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED 10
 
 struct aesd_buffer_entry
@@ -58,9 +61,11 @@ struct aesd_circular_buffer
 extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
             size_t char_offset, size_t *entry_offset_byte_rtn );
 
-extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
+extern struct aesd_buffer_entry * aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
+
+extern size_t aesd_circular_buffer_byte_count(struct aesd_circular_buffer *buffer);
 
 /**
  * Create a for loop to iterate over each member of the circular buffer.
@@ -81,6 +86,6 @@ extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
             index<AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; \
             index++, entryptr=&((buffer)->entry[index]))
 
-
+#define AESD_CIRCULAR_BUFFER_LAST(buffer)  &((buffer)->entry[(buffer)->in_offs])
 
 #endif /* AESD_CIRCULAR_BUFFER_H */

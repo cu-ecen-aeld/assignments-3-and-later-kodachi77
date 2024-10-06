@@ -1,12 +1,12 @@
 # See example Makefile from scull project
 # Comment/uncomment the following line to disable/enable debugging
-#DEBUG = y
+DEBUG = y
 
 # Add your debugging flag (or not) to CFLAGS
 ifeq ($(DEBUG),y)
-  DEBFLAGS = -O -g -DSCULL_DEBUG # "-O" is needed to expand inlines
+  DEBFLAGS = -O -g -DSCULL_DEBUG -Wno-declaration-after-statement # "-O" is needed to expand inlines
 else
-  DEBFLAGS = -O2
+  DEBFLAGS = -O2 -Wno-declaration-after-statement
 endif
 
 EXTRA_CFLAGS += $(DEBFLAGS)
