@@ -26,10 +26,10 @@
 #define NET_BUFFER_SIZE 2048
 #define MSG_BUFFER_SIZE 2048
 
-#if !USE_AESDCHAR_DRIVER
-#define FILE_PATH "/var/tmp/aesdsocketdata"
-#else
+#if USE_AESDCHAR_DRIVER
 #define FILE_PATH "/dev/aesdchar"
+#else
+#define FILE_PATH "/var/tmp/aesdsocketdata"
 #endif
 
 // BACKGROUND:
@@ -222,30 +222,17 @@ int send_data_to_client(int client_sockfd)
     if (client_sockfd < 0)
         return -1;
 
-    //fseek(file, 0, SEEK_SET);
+#if USE_AESDCHAR_DRIVER
     create_file();
+#else
+    fseek(file, 0, SEEK_SET);
+#endif
 
     char buffer[NET_BUFFER_SIZE] = {0};
     int result = 0;
 
-printf("1\n");
-    while (fgets(buffer, NET_BUFFER_SIZE, file) != NULL) {
-    //while(1)
-    //{
-//	size_t ret = fread(buffer, 1, NET_BUFFER_SIZE, file);
-//	if(!ret ) {
-//	    if(ferror(file)) {
-//		log_error("Failed to read data: %s.", strerror(errno));
-//                result = -1;
-//                break;
-//	    }
-//	    if(feof(file))
-//	    {
-//printf(">>www");
-//		break;
-//	    }
-//	}
-printf("R 2 %s\n", buffer);
+    while (fgets(buffer, NET_BUFFER_SIZE, file) != NULL) 
+    {
         size_t line_length = strlen(buffer);
         size_t total_sent = 0;
         while (total_sent < line_length)
@@ -267,21 +254,26 @@ printf("R 2 %s\n", buffer);
             break;
         }
     }
-printf("3\n");
+#if USE_AESDCHAR_DRIVER
+    // no need to close file
+#else
     fseek(file, 0, SEEK_END);
-
+#endif
     return result;
 }
 
 // this function is not thread safe
 void write_data_to_file(const char *buffer)
 {
-    //assert(file && buffer);
-    //if (!file || !buffer)
-    //    return;
+#if USE_AESDCHAR_DRIVER
     create_file();
+#else
+    assert(file && buffer);
+    if (!file || !buffer)
+        return;
 
-printf(">>%s", buffer);
+#endif
+
     fputs(buffer, file);
     fflush(file);
 }
@@ -475,23 +467,6 @@ int listen_socket()
     return 0;
 }
 
-int make_socket_non_blocking(int sockfd)
-{
-    int flags = fcntl(sockfd, F_GETFL, 0);
-    if (flags < 0)
-    {
-        log_error("Failed to get client socket flags: %s", strerror(errno));
-        return -1;
-    }
-
-    if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1)
-    {
-        log_error("Failed to set client socket to non-blocking: %s", strerror(errno));
-        return -1;
-    }
-    return 0;
-}
-
 int main(int argc, char *argv[])
 {
     if (argc == 2 && strcmp(argv[1], "-d") == 0)
@@ -512,7 +487,12 @@ int main(int argc, char *argv[])
         EXIT();
     }
 
-    if (/*create_file() < 0 ||*/ listen_socket() < 0)
+#if USE_AESDCHAR_DRIVER
+    if (listen_socket() < 0)
+#else
+    if (create_file() < 0 || listen_socket() < 0)
+    
+#endif
     {
         EXIT();
     }

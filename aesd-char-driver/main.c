@@ -80,7 +80,6 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_p
 	size_t not_copied = copy_to_user(buf, entry->buffptr + offset, bytes_to_write);
 
 	if (not_copied != 0) {
-		PDEBUG(">> 2");
 		retval = -EFAULT;
 		goto read_exit;
 	}
@@ -132,7 +131,6 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 	//PHEXDUMP(entry->buffptr, entry->size);
 
 	if (entry->buffptr[entry->size - 1] == '\n') {
-		PDEBUG("adding circular buffer entry: %d", dev->buffer.in_offs);
 		PDEBUG(">> %s", entry->buffptr);
 
 		const char *entry_del = aesd_circular_buffer_add_entry(&dev->buffer, entry);
