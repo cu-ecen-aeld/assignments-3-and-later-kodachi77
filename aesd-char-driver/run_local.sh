@@ -10,13 +10,15 @@ if [ $? -eq 0 ]; then
 fi
 
 make
-if [ $? -neq 0 ]; then
+if [[ $? != 0 ]]; then
     exit 0
 fi
 
 echo "Clearing logs"
 #sudo truncate -s 0 /var/log/kern.log
 #sudo truncate -s 0 /var/log/syslog
+
+chmod -x *.c *.h Makefile
 
 echo "Loading dirver"
 sudo ./aesdchar_load

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * aesdchar.h
  *
@@ -10,7 +11,6 @@
 
 #include <linux/mutex.h>
 #include <linux/cdev.h>
-
 
 #include "aesd-circular-buffer.h"
 
@@ -35,23 +35,23 @@
 #endif
 #endif
 
-#define AESD_DEBUG 1  // Remove comment on this line to enable debug
+#define AESD_DEBUG 1		// Remove comment on this line to enable debug
 
-#undef PDEBUG             /* undef it, just in case */
+#undef PDEBUG			/* undef it, just in case */
 #ifdef AESD_DEBUG
-#  ifdef __KERNEL__
+#ifdef __KERNEL__
      /* This one if debugging is on, and kernel space */
-#    define PDEBUG(fmt, args...) do { \
+#define PDEBUG(fmt, args...) do { \
 	DBGPRINT( "aesdchar:%s:%d: " fmt, __func__, __LINE__, ##args); \
 } while(0)
-#  else
+#else
      /* This one for user space */
 #define PDEBUG(string, args...) do {                                       \
     fprintf(stderr, "aesdchar:%s:%d: " fmt, __func__, __LINE__, ##args);     \
 } while (0)
-#  endif
+#endif
 #else
-#  define PDEBUG(fmt, args...) /* not debugging: nothing */
+#define PDEBUG(fmt, args...)	/* not debugging: nothing */
 #endif
 
 #ifdef __KERNEL__
@@ -75,13 +75,11 @@ if (!(expr)) {                                          \
 #define PHEXDUMP(from_addr, len)
 #endif
 
-
-struct aesd_dev
-{
-     struct mutex lock;
-     struct aesd_circular_buffer buffer;
-     struct cdev cdev;     /* Char device structure      */
+struct aesd_dev {
+	struct mutex lock;
+	struct aesd_circular_buffer buffer;
+    struct aesd_buffer_entry entry;
+	struct cdev cdev;	/* Char device structure      */
 };
 
-
-#endif /* AESD_CHAR_DRIVER_AESDCHAR_H_ */
+#endif				/* AESD_CHAR_DRIVER_AESDCHAR_H_ */
