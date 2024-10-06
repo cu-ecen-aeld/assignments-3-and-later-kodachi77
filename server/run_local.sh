@@ -12,18 +12,19 @@ fi
 chmod -x *.c *.h Makefile
 
 make
-../aesd-char-driver/make
+cd ../aesd-char-driver && make && cd ../server
 
 echo "Loading driver"
 sudo ../aesd-char-driver/aesdchar_load
 
+#valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all --track-origins=yes --errors-for-leak-kinds=definite --verbose --log-file=valgrind-out.txt ./aesdsocket &
 ./aesdsocket &
 pid=$!
 
 echo "Running test"
 ../assignment-autotest/test/assignment8/sockettest.sh > sockettest.log 2>&1
 
-dmesg | grep 'aesdchar' > dmesg.log
+sudo tail -512 /var/log/kern.log | grep 'aesdchar' > dmesg.log
 
 kill $pid
 sleep 1

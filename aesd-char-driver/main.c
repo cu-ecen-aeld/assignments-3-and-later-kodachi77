@@ -33,12 +33,20 @@ int aesd_open(struct inode *inode, struct file *filp)
 {
 	struct aesd_dev *dev;
 
-	PDEBUG("open");
+	char *buf = kzalloc(PATH_MAX, GFP_KERNEL);
+
+	if (unlikely(!buf))
+		return -ENOMEM;
+
+	PDEBUG("open '%s'; f_flags = 0x%x\n",
+		file_path(filp, buf, PATH_MAX), filp->f_flags);
+
+	kfree(buf);
 
 	dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
 	filp->private_data = dev;
 
-	return 0;
+	return nonseekable_open(inode, filp);
 }
 
 int aesd_release(struct inode *inode, struct file *filp)
@@ -58,10 +66,10 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_p
 
 	struct aesd_dev *dev = filp->private_data;
 
-	//if (mutex_lock_interruptible(&dev->lock) == -EINTR) {
-	//    return -ERESTARTSYS;
-	//}
-	mutex_lock(&dev->lock);
+	if (mutex_lock_interruptible(&dev->lock) == -EINTR)
+	    return -ERESTARTSYS;
+	
+	//mutex_lock(&dev->lock);
 
 	size_t offset = 0;
 	struct aesd_buffer_entry *entry = NULL;
@@ -100,10 +108,10 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 
 	PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
-	//if (mutex_lock_interruptible(&dev->lock) == -EINTR) {
-	//    return -ERESTARTSYS;
-	//}
-	mutex_lock(&dev->lock);
+	if (mutex_lock_interruptible(&dev->lock) == -EINTR)
+	    return -ERESTARTSYS;
+	
+	//mutex_lock(&dev->lock);
 
 	struct aesd_buffer_entry *entry = &dev->entry;
 
@@ -136,9 +144,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 		const char *entry_del = aesd_circular_buffer_add_entry(&dev->buffer, entry);
 
 		memset(&aesd_device.entry, 0, sizeof(struct aesd_buffer_entry));
-		if (entry_del) {
+		if (entry_del)
 			kfree(entry_del);
-		}
 	}
 
 	//*f_pos = aesd_circular_buffer_byte_count(&dev->buffer);
@@ -152,6 +159,7 @@ struct file_operations aesd_fops = {
 	.read = aesd_read,
 	.write = aesd_write,
 	.open = aesd_open,
+	.llseek = no_llseek, 
 	.release = aesd_release,
 };
 

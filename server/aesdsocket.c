@@ -19,14 +19,14 @@
 
 #include "aesdsocket.h"
 
-#define USE_AESDCHAR_DRIVER 1
+#define USE_AESD_CHAR_DEVICE 1
 
 #define PORT 9000
 #define BACKLOG 16
 #define NET_BUFFER_SIZE 2048
 #define MSG_BUFFER_SIZE 2048
 
-#if USE_AESDCHAR_DRIVER
+#if USE_AESD_CHAR_DEVICE
 #define FILE_PATH "/dev/aesdchar"
 #else
 #define FILE_PATH "/var/tmp/aesdsocketdata"
@@ -58,7 +58,7 @@ int sockfd = -1;
 FILE *file = NULL;
 int daemon_mode = 0;
 int child_process = 0;
-#if !USE_AESDCHAR_DRIVER
+#if !USE_AESD_CHAR_DEVICE
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 volatile sig_atomic_t signal_received = 0;
@@ -158,22 +158,22 @@ void *handle_client(void *arg)
         buffer[n] = '\0';
 
         {
-#if !USE_AESDCHAR_DRIVER
+#if !USE_AESD_CHAR_DEVICE
             pthread_mutex_lock(&file_mutex);
 #endif
             write_data_to_file(buffer);
-#if !USE_AESDCHAR_DRIVER
+#if !USE_AESD_CHAR_DEVICE
 	    pthread_mutex_unlock(&file_mutex);
 #endif
         }
 
         if (strchr(buffer, '\n'))
         {
-#if !USE_AESDCHAR_DRIVER
+#if !USE_AESD_CHAR_DEVICE
             pthread_mutex_lock(&file_mutex);
 #endif
 	    send_data_to_client(client_sockfd);
-#if !USE_AESDCHAR_DRIVER
+#if !USE_AESD_CHAR_DEVICE
             pthread_mutex_unlock(&file_mutex);
 #endif
 	    goto thread_exit;
@@ -197,7 +197,7 @@ void cleanup_resources()
     {
         close(sockfd);
     }
-#if !USE_AESDCHAR_DRIVER
+#if !USE_AESD_CHAR_DEVICE
     pthread_mutex_lock(&file_mutex);
 #endif
     if (file)
@@ -205,7 +205,7 @@ void cleanup_resources()
         fclose(file);
         file = NULL;
     }
-#if !USE_AESDCHAR_DRIVER
+#if !USE_AESD_CHAR_DEVICE
     pthread_mutex_unlock(&file_mutex);
     pthread_mutex_destroy(&file_mutex);
     if (signal_received == SIGINT || signal_received == SIGTERM)
@@ -222,7 +222,7 @@ int send_data_to_client(int client_sockfd)
     if (client_sockfd < 0)
         return -1;
 
-#if USE_AESDCHAR_DRIVER
+#if USE_AESD_CHAR_DEVICE
     create_file();
 #else
     fseek(file, 0, SEEK_SET);
@@ -254,7 +254,7 @@ int send_data_to_client(int client_sockfd)
             break;
         }
     }
-#if USE_AESDCHAR_DRIVER
+#if USE_AESD_CHAR_DEVICE
     // no need to close file
 #else
     fseek(file, 0, SEEK_END);
@@ -265,7 +265,7 @@ int send_data_to_client(int client_sockfd)
 // this function is not thread safe
 void write_data_to_file(const char *buffer)
 {
-#if USE_AESDCHAR_DRIVER
+#if USE_AESD_CHAR_DEVICE
     create_file();
 #else
     assert(file && buffer);
@@ -487,7 +487,7 @@ int main(int argc, char *argv[])
         EXIT();
     }
 
-#if USE_AESDCHAR_DRIVER
+#if USE_AESD_CHAR_DEVICE
     if (listen_socket() < 0)
 #else
     if (create_file() < 0 || listen_socket() < 0)

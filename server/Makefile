@@ -4,7 +4,7 @@ CC ?= $(CROSS_COMPILE)gcc
 INSTALL ?= install
 CFLAGS ?= -Wall -Wextra -Werror -O2 -Wno-maybe-uninitialized
 LDFLAGS ?= -g -rdynamic
-LDLIBS ?= -pthread -lrt -lexecinfo
+LDLIBS ?= -pthread -lrt
 TARGET = aesdsocket
 SRCS = aesdsocket.c
 OBJS = $(SRCS:.c=.o)
