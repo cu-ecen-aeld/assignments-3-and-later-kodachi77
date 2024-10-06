@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * aesdchar.h
  *
@@ -42,8 +42,8 @@
 #ifdef __KERNEL__
      /* This one if debugging is on, and kernel space */
 #define PDEBUG(fmt, args...) do { \
-	DBGPRINT( "aesdchar:%s:%d: " fmt, __func__, __LINE__, ##args); \
-} while(0)
+	DBGPRINT("aesdchar:%s:%d: " fmt, __func__, __LINE__, ##args); \
+} while (0)
 #else
      /* This one for user space */
 #define PDEBUG(string, args...) do {                                       \
@@ -78,7 +78,7 @@ if (!(expr)) {                                          \
 struct aesd_dev {
 	struct mutex lock;
 	struct aesd_circular_buffer buffer;
-    struct aesd_buffer_entry entry;
+	struct aesd_buffer_entry entry;
 	struct cdev cdev;	/* Char device structure      */
 };
 

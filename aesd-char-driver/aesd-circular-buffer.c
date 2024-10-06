@@ -1,6 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+// SPDX-License-Identifier: GPL-2.0-or-later
 /**
- * @file aesd-circular-buffer.c
  * @brief Functions and data related to a circular buffer imlementation
  *
  * @author Dan Walkes
@@ -34,12 +33,14 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 									  size_t
 									  *entry_offset_byte_rtn)
 {
+	if (buffer->out_offs == buffer->in_offs && !buffer->full)
+		return NULL;
+
 	size_t cumulative_size = 0;
 	size_t current_offset = buffer->out_offs;
-	size_t entry_index = 0;
 
 	// Iterate through the buffer entries
-	while (entry_index < buffer->count) {
+	do {
 		struct aesd_buffer_entry *entry = &buffer->entry[current_offset];
 
 		// Check if the char_offset falls within the current entry
@@ -54,26 +55,25 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 		// Move to the next entry
 		current_offset =
 		    (current_offset + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-		entry_index++;
-	}
+	} while (current_offset != buffer->in_offs);
 
 	// If we reach here, the char_offset is not available in the buffer
 	return NULL;
 }
 
 /**
-* Adds entry @param add_entry to @param buffer in the location specified in buffer->in_offs.
-* If the buffer was already full, overwrites the oldest entry and advances buffer->out_offs to the
-* new start location.
-* Any necessary locking must be handled by the caller
-* Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
-*/
-struct aesd_buffer_entry *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry
-							 *add_entry)
+ * Adds entry @param add_entry to @param buffer in the location specified in buffer->in_offs.
+ * If the buffer was already full, overwrites the oldest entry and advances buffer->out_offs to the
+ * new start location.
+ * Any necessary locking must be handled by the caller
+ * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
+ */
+const char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry
+					   *add_entry)
 {
+
 	// Return current 'in' entry
-	struct aesd_buffer_entry *retval =
-	    buffer->full ? &buffer->entry[buffer->in_offs] : NULL;
+	const char *retval = buffer->full ? buffer->entry[buffer->in_offs].buffptr : NULL;
 
 	// Add the new entry at the in_offs position
 	if (add_entry) {
@@ -83,26 +83,22 @@ struct aesd_buffer_entry *aesd_circular_buffer_add_entry(struct aesd_circular_bu
 	// Advance in_offs to the next position
 	buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
 
-	// Check if the buffer is full
-	if (buffer->count == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
-		buffer->full = true;
-	} else {
-		// Buffer is not full, increment the count
-		buffer->count++;
-	}
-
 	if (buffer->full) {
 		// Buffer is full, advance out_offs to overwrite the oldest entry
 		buffer->out_offs =
 		    (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
 	}
 
+	if (buffer->in_offs == buffer->out_offs) {
+		buffer->full = true;
+	}
+
 	return retval;
 }
 
 /**
-* Initializes the circular buffer described by @param buffer to an empty struct
-*/
+ * Initializes the circular buffer described by @param buffer to an empty struct
+ */
 void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 {
 	memset(buffer, 0, sizeof(struct aesd_circular_buffer));
@@ -113,6 +109,7 @@ size_t aesd_circular_buffer_byte_count(struct aesd_circular_buffer *buffer)
 	size_t byte_count = 0;
 	uint8_t index;
 	struct aesd_buffer_entry *entry;
+
 	AESD_CIRCULAR_BUFFER_FOREACH(entry, buffer, index) {
 		byte_count += entry->size;
 	}

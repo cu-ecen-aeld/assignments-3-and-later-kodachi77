@@ -10,9 +10,6 @@ if [ $? -eq 0 ]; then
 fi
 
 make
-if [[ $? != 0 ]]; then
-    exit 0
-fi
 
 echo "Clearing logs"
 #sudo truncate -s 0 /var/log/kern.log

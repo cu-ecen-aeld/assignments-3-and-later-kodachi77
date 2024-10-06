@@ -59,7 +59,7 @@ checkpatch:
 	@echo
 	@echo "--- kernel code style check with checkpatch.pl ---"
 	@echo
-	$(KERNELDIR)/scripts/checkpatch.pl --no-tree -f --max-line-length=95 *.[ch]
+	$(KERNELDIR)/scripts/checkpatch.pl --no-tree -f --fix-inplace --max-line-length=95 *.[ch]
 
 #--- Static Analysis
 # sa : "wrapper" target over the following kernel static analyzer targets

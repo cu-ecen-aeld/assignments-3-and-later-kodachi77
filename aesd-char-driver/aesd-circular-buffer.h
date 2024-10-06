@@ -1,7 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * aesd-circular-buffer.h
- *
+// SPDX-License-Identifier: GPL-2.0-or-later
+/**
  *  Created on: March 1st, 2020
  *      Author: Dan Walkes
  */
@@ -65,9 +63,9 @@ extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos
 										 size_t
 										 *entry_offset_byte_rtn);
 
-extern struct aesd_buffer_entry *aesd_circular_buffer_add_entry(struct aesd_circular_buffer
-								*buffer, const struct aesd_buffer_entry
-								*add_entry);
+extern const char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer
+						  *buffer, const struct aesd_buffer_entry
+						  *add_entry);
 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 
@@ -83,15 +81,13 @@ extern size_t aesd_circular_buffer_byte_count(struct aesd_circular_buffer *buffe
  * uint8_t index;
  * struct aesd_circular_buffer buffer;
  * struct aesd_buffer_entry *entry;
- * AESD_CIRCULAR_BUFFER_FOREACH(entry,&buffer,index) {
+ * AESD_CIRCULAR_BUFFER_FOREACH(entry, &buffer, index) {
  *      free(entry->buffptr);
  * }
  */
-#define AESD_CIRCULAR_BUFFER_FOREACH(entryptr,buffer,index) \
-    for(index=0, entryptr=&((buffer)->entry[index]); \
-            index<AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; \
-            index++, entryptr=&((buffer)->entry[index]))
-
-#define AESD_CIRCULAR_BUFFER_LAST(buffer)  &((buffer)->entry[(buffer)->in_offs])
+#define AESD_CIRCULAR_BUFFER_FOREACH(entryptr, buffer, index) \
+    for (index = 0, entryptr =  &((buffer)->entry[index]); \
+	    index < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; \
+	    index++, entryptr =  &((buffer)->entry[index]))
 
 #endif				/* AESD_CIRCULAR_BUFFER_H */
