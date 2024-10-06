@@ -5,7 +5,7 @@ sudo -v
 lsmod | grep 'aesdchar' > /dev/null 2>&1
 if [ $? -eq 0 ]; then
     echo "Driver is already loaded. Unloading..."
-    sudo ./aesdchar_unload
+    sudo ../aesd-char-driver/aesdchar_unload
 
 fi
 
@@ -33,6 +33,8 @@ if kill -0 $pid 2>/dev/null; then
 else
     echo "aesdsocket ($pid) has been killed."
 fi
+
+# cat /dev/aesdchar
 
 echo "Unloading driver"
 sudo ../aesd-char-driver/aesdchar_unload

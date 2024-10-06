@@ -99,7 +99,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 
 	struct aesd_dev *dev = filp->private_data;
 
-	PDEBUG("write %zu bytes with offset %lld @ %d", count, *f_pos, dev->buffer.in_offs);
+	PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
 	//if (mutex_lock_interruptible(&dev->lock) == -EINTR) {
 	//    return -ERESTARTSYS;
@@ -143,7 +143,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 		}
 	}
 
-	*f_pos = aesd_circular_buffer_byte_count(&dev->buffer);
+	//*f_pos = aesd_circular_buffer_byte_count(&dev->buffer);
  write_exit:
 	mutex_unlock(&dev->lock);
 	return retval;

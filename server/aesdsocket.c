@@ -207,13 +207,13 @@ void cleanup_resources()
     }
 #if !USE_AESDCHAR_DRIVER
     pthread_mutex_unlock(&file_mutex);
-
     pthread_mutex_destroy(&file_mutex);
-#endif
     if (signal_received == SIGINT || signal_received == SIGTERM)
     {
         remove(FILE_PATH);
     }
+#endif
+
 }
 
 int send_data_to_client(int client_sockfd)
@@ -222,15 +222,30 @@ int send_data_to_client(int client_sockfd)
     if (client_sockfd < 0)
         return -1;
 
-    fseek(file, 0, SEEK_SET);
+    //fseek(file, 0, SEEK_SET);
+    create_file();
 
     char buffer[NET_BUFFER_SIZE] = {0};
     int result = 0;
 
 printf("1\n");
-    while (fgets(buffer, NET_BUFFER_SIZE, file) != NULL)
-    {
-printf("2\n");
+    while (fgets(buffer, NET_BUFFER_SIZE, file) != NULL) {
+    //while(1)
+    //{
+//	size_t ret = fread(buffer, 1, NET_BUFFER_SIZE, file);
+//	if(!ret ) {
+//	    if(ferror(file)) {
+//		log_error("Failed to read data: %s.", strerror(errno));
+//                result = -1;
+//                break;
+//	    }
+//	    if(feof(file))
+//	    {
+//printf(">>www");
+//		break;
+//	    }
+//	}
+printf("R 2 %s\n", buffer);
         size_t line_length = strlen(buffer);
         size_t total_sent = 0;
         while (total_sent < line_length)
@@ -261,10 +276,12 @@ printf("3\n");
 // this function is not thread safe
 void write_data_to_file(const char *buffer)
 {
-    assert(file && buffer);
-    if (!file || !buffer)
-        return;
+    //assert(file && buffer);
+    //if (!file || !buffer)
+    //    return;
+    create_file();
 
+printf(">>%s", buffer);
     fputs(buffer, file);
     fflush(file);
 }
@@ -403,13 +420,10 @@ int setup_socket()
 
 int create_file()
 {
-    assert(!file);
     if (file)
     {
-        log_error("File is already opened");
         fclose(file);
         file = NULL;
-        return -1;
     }
     file = fopen(FILE_PATH, "a+");
 
@@ -498,7 +512,7 @@ int main(int argc, char *argv[])
         EXIT();
     }
 
-    if (create_file() < 0 || listen_socket() < 0)
+    if (/*create_file() < 0 ||*/ listen_socket() < 0)
     {
         EXIT();
     }
