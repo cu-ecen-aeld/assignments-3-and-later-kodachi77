@@ -4,10 +4,14 @@ CC ?= $(CROSS_COMPILE)gcc
 INSTALL ?= install
 CFLAGS ?= -Wall -Wextra -Werror -O2 -Wno-maybe-uninitialized
 LDFLAGS ?= -g -rdynamic
-LDLIBS ?= -pthread -lrt
+LDLIBS ?= -pthread -lrt -lexecinfo
 TARGET = aesdsocket
 SRCS = aesdsocket.c
 OBJS = $(SRCS:.c=.o)
+
+ifneq ($(CROSS_COMPILE),)
+    LDLIBS += -lexecinfo
+endif
 
 # Installation directory
 INSTALL_DIR ?= /usr/bin
@@ -18,7 +22,6 @@ all: $(TARGET)
 # Link the object files to create the final executable
 $(TARGET): $(OBJS)
 	$(CC) $^ $(LDFLAGS) $(LDLIBS) -o $@ 
-#	strip --strip-all $@
 
 # Compile the C source files into object files
 %.o: %.c
