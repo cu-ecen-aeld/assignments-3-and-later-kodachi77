@@ -9,7 +9,9 @@ TARGET = aesdsocket
 SRCS = aesdsocket.c
 OBJS = $(SRCS:.c=.o)
 
-ifeq ($(KERNEL_ARCH),arm64)
+MY_ARCH := $(shell $(CC) -dumpmachine | cut -d'-' -f1)
+
+ifneq ($(MY_ARCH),x86_64)
     LDLIBS += -lexecinfo
 endif
 
