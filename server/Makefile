@@ -9,7 +9,7 @@ TARGET = aesdsocket
 SRCS = aesdsocket.c
 OBJS = $(SRCS:.c=.o)
 
-ifeq ($(ARCH),arm64)
+ifeq ($(KERNEL_ARCH),arm64)
     LDLIBS += -lexecinfo
 endif
 
