@@ -34,11 +34,10 @@
 #endif
 
 // BACKGROUND:
-// 3 different implementations were removed from this version (assignment 8). They were:
+// 3 different threading implementations are now located in aesdcoket_multi.c. They are:
 // - classic threaded
 // - epoll single-treaded
-// - epoll with thread pool
-// Refer to older file versions if you are curious. No more time in this one either.
+// - epoll with a thread pool
 // For this assignment we will use classic threaded implementation.
 
 #define EXIT()         \
@@ -185,7 +184,6 @@ void *handle_client(void *arg)
 #if USE_AESD_CHAR_DEVICE
         if (strncmp(buffer, "AESDCHAR_IOCSEEKTO:", 19) == 0)
         {
-            printf("Received ioctl command: %s\n", buffer);
             if (handle_ioctl_command(buffer) == 0)
             {
 	            send_data_to_client(client_sockfd, false);
