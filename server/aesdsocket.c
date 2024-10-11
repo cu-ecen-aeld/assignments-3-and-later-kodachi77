@@ -18,6 +18,7 @@
 #include <sys/epoll.h>
 
 #include "aesdsocket.h"
+#include "../aesd-char-driver/aesd_ioctl.h"
 
 #define USE_AESD_CHAR_DEVICE 1
 
@@ -145,6 +146,31 @@ void handle_signal(int signal)
     }
 }
 
+int handle_ioctl_command(const char *cmd_str)
+{
+    assert(file && cmd_str);
+    if (!file || !cmd_str)
+        return -1;
+
+    int fd = fileno(file);
+    if(fd < 0) {
+        log_error("Failed to get file descriptor: %s", strerror(errno));
+        return -1;
+    }
+
+    struct aesd_seekto seekto;
+    if (sscanf(cmd_str, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) == 2)
+    {
+        if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto))
+        {
+            log_error("ioctl AESDCHAR_IOCSEEKTO failed: %s", strerror(errno));
+            return -1;
+        }
+        return 0;
+    }
+    return -1;
+}
+
 void *handle_client(void *arg)
 {
     thread_info_t *thread_info = (thread_info_t *)arg;
@@ -156,14 +182,30 @@ void *handle_client(void *arg)
     while ((n = recv(client_sockfd, buffer, NET_BUFFER_SIZE - 1, 0)) > 0)
     {
         buffer[n] = '\0';
+#if USE_AESD_CHAR_DEVICE
+        if (strncmp(buffer, "AESDCHAR_IOCSEEKTO:", 19) == 0)
+        {
+            printf("Received ioctl command: %s\n", buffer);
+            if (handle_ioctl_command(buffer) == 0)
+            {
+	            send_data_to_client(client_sockfd, false);
+        	    goto thread_exit;
+            }
+            else
+            {
+                log_error("Invalid ioctl command: %s", buffer);
+                goto thread_exit;
+            }
+        }
+#endif
 
         {
 #if !USE_AESD_CHAR_DEVICE
             pthread_mutex_lock(&file_mutex);
-#endif
             write_data_to_file(buffer);
-#if !USE_AESD_CHAR_DEVICE
-	    pthread_mutex_unlock(&file_mutex);
+	        pthread_mutex_unlock(&file_mutex);
+#else
+            write_data_to_file(buffer);
 #endif
         }
 
@@ -171,10 +213,10 @@ void *handle_client(void *arg)
         {
 #if !USE_AESD_CHAR_DEVICE
             pthread_mutex_lock(&file_mutex);
-#endif
-	    send_data_to_client(client_sockfd);
-#if !USE_AESD_CHAR_DEVICE
+	        send_data_to_client(client_sockfd);
             pthread_mutex_unlock(&file_mutex);
+#else
+            send_data_to_client(client_sockfd, true);
 #endif
 	    goto thread_exit;
         }
@@ -216,17 +258,14 @@ void cleanup_resources()
 
 }
 
-int send_data_to_client(int client_sockfd)
+int send_data_to_client(int client_sockfd, bool need_fseek)
 {
     assert(client_sockfd >= 0);
     if (client_sockfd < 0)
         return -1;
 
-#if USE_AESD_CHAR_DEVICE
-    create_file();
-#else
-    fseek(file, 0, SEEK_SET);
-#endif
+    if(need_fseek)
+        fseek(file, 0, SEEK_SET);
 
     char buffer[NET_BUFFER_SIZE] = {0};
     int result = 0;
@@ -254,25 +293,19 @@ int send_data_to_client(int client_sockfd)
             break;
         }
     }
-#if USE_AESD_CHAR_DEVICE
-    // no need to close file
-#else
+
+
     fseek(file, 0, SEEK_END);
-#endif
+
     return result;
 }
 
 // this function is not thread safe
 void write_data_to_file(const char *buffer)
 {
-#if USE_AESD_CHAR_DEVICE
-    create_file();
-#else
     assert(file && buffer);
     if (!file || !buffer)
         return;
-
-#endif
 
     fputs(buffer, file);
     fflush(file);
@@ -487,12 +520,7 @@ int main(int argc, char *argv[])
         EXIT();
     }
 
-#if USE_AESD_CHAR_DEVICE
-    if (listen_socket() < 0)
-#else
     if (create_file() < 0 || listen_socket() < 0)
-    
-#endif
     {
         EXIT();
     }

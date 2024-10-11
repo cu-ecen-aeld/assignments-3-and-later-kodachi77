@@ -22,7 +22,8 @@ sudo ../aesd-char-driver/aesdchar_load
 pid=$!
 
 echo "Running test"
-../assignment-autotest/test/assignment8/sockettest.sh > sockettest.log 2>&1
+#../assignment-autotest/test/assignment8/sockettest.sh > sockettest.log 2>&1
+../assignment-autotest/test/assignment9/sockettest.sh > sockettest.log 2>&1
 
 sudo tail -512 /var/log/kern.log | grep 'aesdchar' > dmesg.log
 

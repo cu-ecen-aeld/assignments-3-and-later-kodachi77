@@ -2,6 +2,7 @@
 #define AESDSOCKET_H__
 
 #include <sys/queue.h>
+#include <stdbool.h>
 
 typedef struct thread_info
 {
@@ -36,7 +37,7 @@ void* handle_client(void *arg);
 
 int listen_socket();
 
-int send_data_to_client(int client_sockfd);
+int send_data_to_client(int client_sockfd, bool need_fseek);
 
 void write_data_to_file(const char* buffer);
 
