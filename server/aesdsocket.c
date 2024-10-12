@@ -39,6 +39,10 @@
 // - epoll single-treaded
 // - epoll with a thread pool
 // For this assignment we will use classic threaded implementation.
+// Due to limitiations of the unit tests for the assignment we will have to open and close 
+// the file on-demand (for each client connection). In order to help with that we will introduce
+// a file reference counter. The file will be opened only once and closed when the reference counter
+// reaches 0.
 
 #define EXIT()         \
     do                 \
@@ -55,13 +59,73 @@
 
 // Global variables
 int sockfd = -1;
-FILE *file = NULL;
+file_ref_t file_ref = {0};
 int daemon_mode = 0;
 int child_process = 0;
-#if !USE_AESD_CHAR_DEVICE
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
-#endif
 volatile sig_atomic_t signal_received = 0;
+
+void file_ref_init(file_ref_t* file_ref, const char *filename, const char *mode)
+{
+    //assert(pthread_equal(pthread_self(), main_thread_id)); 
+
+    file_ref->filename = strdup(filename);
+    file_ref->mode = strdup(mode);
+    file_ref->file = NULL;
+    file_ref->ref_count = 0;
+    pthread_mutex_init(&file_ref->mutex, NULL);
+}
+
+FILE* file_ref_acquire(file_ref_t *file_ref)
+{
+    pthread_mutex_lock(&file_ref->mutex);
+    if (file_ref->ref_count == 0)
+    {
+        file_ref->file = fopen(file_ref->filename, file_ref->mode);
+        if (!file_ref->file)
+        {
+            log_error("Failed to open file: %s", file_ref->filename);
+            pthread_mutex_unlock(&file_ref->mutex);
+            return NULL;
+        }
+    }
+    file_ref->ref_count++;
+    pthread_mutex_unlock(&file_ref->mutex);
+    return file_ref->file;
+}
+
+void file_ref_release(file_ref_t *file_ref)
+{
+    pthread_mutex_lock(&file_ref->mutex);
+    if (file_ref->file == NULL)
+    {
+        pthread_mutex_unlock(&file_ref->mutex);
+        return;
+    }
+
+    if (--file_ref->ref_count == 0)
+    {
+        fclose(file_ref->file);
+        file_ref->file = NULL;
+    }
+    pthread_mutex_unlock(&file_ref->mutex);
+}
+
+void file_ref_destroy(file_ref_t *file_ref)
+{
+    //assert(pthread_equal(pthread_self(), main_thread_id)); 
+
+    pthread_mutex_lock(&file_ref->mutex);
+    if (file_ref->file != NULL)
+    {
+        fclose(file_ref->file);
+        file_ref->file = NULL;
+    }
+    pthread_mutex_unlock(&file_ref->mutex);
+    pthread_mutex_destroy(&file_ref->mutex);
+    free((void*)file_ref->filename);
+    free((void*)file_ref->mode);
+}
 
 static inline int is_daemon()
 {
@@ -145,29 +209,31 @@ void handle_signal(int signal)
     }
 }
 
-int handle_ioctl_command(const char *cmd_str)
+int handle_ioctl_command(FILE* file, const char *cmd_str)
 {
-    assert(file && cmd_str);
     if (!file || !cmd_str)
         return -1;
+
+    int retval = -1;
 
     int fd = fileno(file);
     if(fd < 0) {
         log_error("Failed to get file descriptor: %s", strerror(errno));
-        return -1;
+        goto ioctl_exit;
     }
 
     struct aesd_seekto seekto;
     if (sscanf(cmd_str, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) == 2)
     {
-        if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto))
+        if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto) != 0)
         {
             log_error("ioctl AESDCHAR_IOCSEEKTO failed: %s", strerror(errno));
-            return -1;
+            goto ioctl_exit;
         }
-        return 0;
+        retval = 0;
     }
-    return -1;
+ioctl_exit:
+    return retval;
 }
 
 void *handle_client(void *arg)
@@ -175,60 +241,67 @@ void *handle_client(void *arg)
     thread_info_t *thread_info = (thread_info_t *)arg;
     int client_sockfd = thread_info->client_sockfd;
 
+    char* cmd_buffer = NULL;
+    size_t cmd_buffer_size = 0;
     char buffer[NET_BUFFER_SIZE] = {0};
     int n;
 
     while ((n = recv(client_sockfd, buffer, NET_BUFFER_SIZE - 1, 0)) > 0)
     {
         buffer[n] = '\0';
-#if USE_AESD_CHAR_DEVICE
-        if (strncmp(buffer, "AESDCHAR_IOCSEEKTO:", 19) == 0)
-        {
-            if (handle_ioctl_command(buffer) == 0)
-            {
-	            send_data_to_client(client_sockfd, false);
-        	    goto thread_exit;
-            }
-            else
-            {
-                log_error("Invalid ioctl command: %s", buffer);
-                goto thread_exit;
-            }
-        }
-#endif
 
+        cmd_buffer = realloc(cmd_buffer, cmd_buffer_size + n + 1);
+        if (!cmd_buffer)
         {
-#if !USE_AESD_CHAR_DEVICE
-            pthread_mutex_lock(&file_mutex);
-            write_data_to_file(buffer);
-	        pthread_mutex_unlock(&file_mutex);
-#else
-            write_data_to_file(buffer);
-#endif
+            log_error("Failed to allocate memory for command buffer.");
+            goto thread_exit;
         }
+        strncpy(cmd_buffer + cmd_buffer_size, buffer, n + 1);
+        cmd_buffer_size += n;
 
         if (strchr(buffer, '\n'))
         {
-#if !USE_AESD_CHAR_DEVICE
+            FILE* file = file_ref_acquire(&file_ref);
+            if(!file) {
+                log_error("Failed to acquire file reference.");
+                goto thread_exit;
+            }
+#if USE_AESD_CHAR_DEVICE
+            if (strncmp(cmd_buffer, "AESDCHAR_IOCSEEKTO:", 19) == 0)
+            {
+                if (handle_ioctl_command(file, cmd_buffer) == 0)
+                {
+                    send_data_to_client(file, client_sockfd, false);
+                    goto thread_exit;
+                }
+                else
+                {
+                    log_error("Invalid ioctl command: %s", buffer);
+                    goto thread_exit;
+                }
+            }
+#endif       
+            // since we're using fputs that is buffered we need to lock the file mutex
             pthread_mutex_lock(&file_mutex);
-	        send_data_to_client(client_sockfd);
-            pthread_mutex_unlock(&file_mutex);
-#else
-            send_data_to_client(client_sockfd, true);
-#endif
-	    goto thread_exit;
+            write_data_to_file(file, buffer);
+            send_data_to_client(file, client_sockfd, true);
+	        pthread_mutex_unlock(&file_mutex);
+            goto thread_exit;
         }
     }
 
 thread_exit:
+    free(cmd_buffer);
+
     close(client_sockfd);
+
+    file_ref_release(&file_ref);
 
     free(thread_info);
 
     void *retval = NULL;
     pthread_exit(retval);
-
-    return NULL;
+    return retval;
 }
 
 void cleanup_resources()
@@ -237,29 +310,23 @@ void cleanup_resources()
     {
         close(sockfd);
     }
-#if !USE_AESD_CHAR_DEVICE
-    pthread_mutex_lock(&file_mutex);
-#endif
-    if (file)
-    {
-        fclose(file);
-        file = NULL;
-    }
-#if !USE_AESD_CHAR_DEVICE
-    pthread_mutex_unlock(&file_mutex);
+
+    file_ref_destroy(&file_ref);
+
     pthread_mutex_destroy(&file_mutex);
+
+#if !USE_AESD_CHAR_DEVICE    
     if (signal_received == SIGINT || signal_received == SIGTERM)
     {
         remove(FILE_PATH);
     }
 #endif
-
 }
 
-int send_data_to_client(int client_sockfd, bool need_fseek)
+int send_data_to_client(FILE* file, int client_sockfd, bool need_fseek)
 {
-    assert(client_sockfd >= 0);
-    if (client_sockfd < 0)
+    assert(file && client_sockfd >= 0);
+    if (!file || client_sockfd < 0)
         return -1;
 
     if(need_fseek)
@@ -299,14 +366,14 @@ int send_data_to_client(int client_sockfd, bool need_fseek)
 }
 
 // this function is not thread safe
-void write_data_to_file(const char *buffer)
+void write_data_to_file(FILE* file, const char *buffer)
 {
     assert(file && buffer);
     if (!file || !buffer)
         return;
 
     fputs(buffer, file);
-    fflush(file);
+    fflush(file); 
 }
 
 int run_daemon()
@@ -441,23 +508,18 @@ int setup_socket()
     return 0;
 }
 
-int create_file()
-{
-    if (file)
-    {
-        fclose(file);
-        file = NULL;
-    }
-    file = fopen(FILE_PATH, "a+");
+// int create_file()
+// {
+//     if (!file) {
+//         file = fopen(FILE_PATH, "a+");
+//         if (!file) {
+//             log_error("Failed to open file: %s", strerror(errno));
+//             return -1;
+//         }
+//     }
 
-    if (!file)
-    {
-        log_error("Failed to open file: %s", strerror(errno));
-        return -1;
-    }
-
-    return 0;
-}
+//     return 0;
+// }
 
 int create_detached_thread(int client_sockfd)
 {
@@ -518,7 +580,9 @@ int main(int argc, char *argv[])
         EXIT();
     }
 
-    if (create_file() < 0 || listen_socket() < 0)
+    file_ref_init(&file_ref, FILE_PATH, "a+");
+
+    if (listen_socket() < 0)
     {
         EXIT();
     }
