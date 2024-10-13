@@ -26,12 +26,16 @@
 #define BACKLOG 16
 #define NET_BUFFER_SIZE 2048
 #define MSG_BUFFER_SIZE 2048
+#define MAX_THREADS 128
+#define INVALID_TIMER (timer_t)(-1)
 
 #if USE_AESD_CHAR_DEVICE
 #define FILE_PATH "/dev/aesdchar"
 #else
 #define FILE_PATH "/var/tmp/aesdsocketdata"
 #endif
+
+#define JMETER_LOAD_TEST 0
 
 // BACKGROUND:
 // 3 different threading implementations are now located in aesdcoket_multi.c. They are:
@@ -41,14 +45,15 @@
 // For this assignment we will use classic threaded implementation.
 // Due to limitiations of the unit tests for the assignment we will have to open and close 
 // the file on-demand (for each client connection). In order to help with that we will introduce
-// a file reference counter. The file will be opened only once and closed when the reference counter
-// reaches 0.
+// a ref-counted file reference. The file will be opened on-demand and closed when the 
+// reference counter reaches 0.
 
 #define EXIT()         \
     do                 \
     {                  \
         goto app_exit; \
     } while (0)
+
 #define LOG_ERROR_AND_EXIT(...) \
     do                          \
     {                           \
@@ -63,12 +68,13 @@ file_ref_t file_ref = {0};
 int daemon_mode = 0;
 int child_process = 0;
 pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+timer_t timer_id = INVALID_TIMER;
 volatile sig_atomic_t signal_received = 0;
+
+thread_info_t thread_pool[MAX_THREADS] = {0};
 
 void file_ref_init(file_ref_t* file_ref, const char *filename, const char *mode)
 {
-    //assert(pthread_equal(pthread_self(), main_thread_id)); 
-
     file_ref->filename = strdup(filename);
     file_ref->mode = strdup(mode);
     file_ref->file = NULL;
@@ -113,8 +119,6 @@ void file_ref_release(file_ref_t *file_ref)
 
 void file_ref_destroy(file_ref_t *file_ref)
 {
-    //assert(pthread_equal(pthread_self(), main_thread_id)); 
-
     pthread_mutex_lock(&file_ref->mutex);
     if (file_ref->file != NULL)
     {
@@ -209,31 +213,47 @@ void handle_signal(int signal)
     }
 }
 
+void handle_timer(union sigval sv)
+{
+    (void)sv;
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    char timestamp[128];
+    strftime(timestamp, sizeof(timestamp), "timestamp: %a, %d %b %Y %H:%M:%S %z\n", tm_info);
+    
+    FILE *file = file_ref_acquire(&file_ref);
+
+    pthread_mutex_lock(&file_mutex);
+    write_data_to_file(file, timestamp);
+    pthread_mutex_unlock(&file_mutex);
+
+    file_ref_release(&file_ref);
+}
+
 int handle_ioctl_command(FILE* file, const char *cmd_str)
 {
+    assert(file && cmd_str);
     if (!file || !cmd_str)
         return -1;
 
-    int retval = -1;
-
     int fd = fileno(file);
-    if(fd < 0) {
+    if(fd < 0) 
+    {
         log_error("Failed to get file descriptor: %s", strerror(errno));
-        goto ioctl_exit;
+        return -1;
     }
 
-    struct aesd_seekto seekto;
+    struct aesd_seekto seekto = {0};
     if (sscanf(cmd_str, "AESDCHAR_IOCSEEKTO:%u,%u", &seekto.write_cmd, &seekto.write_cmd_offset) == 2)
     {
         if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto) != 0)
         {
             log_error("ioctl AESDCHAR_IOCSEEKTO failed: %s", strerror(errno));
-            goto ioctl_exit;
+            return -1;
         }
-        retval = 0;
+        return 0;
     }
-ioctl_exit:
-    return retval;
+    return -1;
 }
 
 void *handle_client(void *arg)
@@ -246,17 +266,35 @@ void *handle_client(void *arg)
     char buffer[NET_BUFFER_SIZE] = {0};
     int n;
 
-    while ((n = recv(client_sockfd, buffer, NET_BUFFER_SIZE - 1, 0)) > 0)
+    while(1)
     {
-        buffer[n] = '\0';
+        n = recv(client_sockfd, buffer, NET_BUFFER_SIZE - 1, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                // Interrupted by signal, check if we should exit
+                if (signal_received) {
+                    break;
+                }
+                // Otherwise, continue to retry recv
+                continue;
+            } else {
+                log_error("Failed to receive data: %s", strerror(errno));
+                break;
+            }
+        } else if (n == 0) {
+            // Connection closed by client
+            break;
+        }
 
-        cmd_buffer = realloc(cmd_buffer, cmd_buffer_size + n + 1);
-        if (!cmd_buffer)
+        buffer[n] = '\0';
+        void* temp = realloc(cmd_buffer, cmd_buffer_size + n + 1);
+        if (!temp)
         {
             log_error("Failed to allocate memory for command buffer.");
             goto thread_exit;
         }
-        strncpy(cmd_buffer + cmd_buffer_size, buffer, n + 1);
+        cmd_buffer = temp;
+        strcpy(cmd_buffer + cmd_buffer_size, buffer);
         cmd_buffer_size += n;
 
         if (strchr(buffer, '\n'))
@@ -266,16 +304,48 @@ void *handle_client(void *arg)
                 log_error("Failed to acquire file reference.");
                 goto thread_exit;
             }
+
+#if JMETER_LOAD_TEST
+            if (strncmp(buffer, "RESET", 5) == 0)
+            {
+                int fd = fileno(file);
+                if (fd < 0)
+                {
+                    log_error("Failed to get file descriptor: %s", strerror(errno));
+                    goto thread_exit;
+                }
+                pthread_mutex_lock(&file_mutex);
+                int ret = ftruncate(fd, 0);
+                if (ret < 0)
+                {
+                    log_error("Failed to truncate file: %s", strerror(errno));
+                }
+                pthread_mutex_unlock(&file_mutex);
+
+                const char *response = "OK\n";
+                if (send(client_sockfd, response, strlen(response), 0) == -1)
+                {
+                    log_error("Failed to send response to client: %s", strerror(errno));
+                    goto thread_exit;
+                }
+
+                goto thread_exit;
+            }
+#endif
+
 #if USE_AESD_CHAR_DEVICE
             if (strncmp(cmd_buffer, "AESDCHAR_IOCSEEKTO:", 19) == 0)
             {
+                pthread_mutex_lock(&file_mutex);
                 if (handle_ioctl_command(file, cmd_buffer) == 0)
                 {
                     send_data_to_client(file, client_sockfd, false);
+                    pthread_mutex_unlock(&file_mutex);
                     goto thread_exit;
                 }
                 else
                 {
+                    pthread_mutex_unlock(&file_mutex);
                     log_error("Invalid ioctl command: %s", buffer);
                     goto thread_exit;
                 }
@@ -283,7 +353,7 @@ void *handle_client(void *arg)
 #endif       
             // since we're using fputs that is buffered we need to lock the file mutex
             pthread_mutex_lock(&file_mutex);
-            write_data_to_file(file, buffer);
+            write_data_to_file(file, cmd_buffer);
             send_data_to_client(file, client_sockfd, true);
 	        pthread_mutex_unlock(&file_mutex);
             goto thread_exit;
@@ -297,11 +367,9 @@ thread_exit:
 
     file_ref_release(&file_ref);
 
-    free(thread_info);
+    atomic_store(&thread_info->finished, true);
 
-    void *retval = NULL;
-    pthread_exit(retval);
-    return retval;
+    return NULL;
 }
 
 void cleanup_resources()
@@ -314,6 +382,11 @@ void cleanup_resources()
     file_ref_destroy(&file_ref);
 
     pthread_mutex_destroy(&file_mutex);
+
+    if (timer_id != INVALID_TIMER)
+    {
+        timer_delete(timer_id);
+    }
 
 #if !USE_AESD_CHAR_DEVICE    
     if (signal_received == SIGINT || signal_received == SIGTERM)
@@ -359,7 +432,6 @@ int send_data_to_client(FILE* file, int client_sockfd, bool need_fseek)
         }
     }
 
-
     fseek(file, 0, SEEK_END);
 
     return result;
@@ -374,6 +446,39 @@ void write_data_to_file(FILE* file, const char *buffer)
 
     fputs(buffer, file);
     fflush(file); 
+}
+
+int create_timer()
+{
+    struct sigevent sev;
+    struct itimerspec its;
+
+    // Set up the signal event to use a thread
+    sev.sigev_notify = SIGEV_THREAD;          // Notify via a thread
+    sev.sigev_value.sival_ptr = &timer_id;    // Can pass argument to thread function
+    sev.sigev_notify_function = handle_timer; // Function to run when timer expires
+    sev.sigev_notify_attributes = NULL;       // Use default thread attributes
+
+    // Create the timer
+    if (timer_create(CLOCK_REALTIME, &sev, &timer_id) == -1)
+    {
+        log_error("Failed to create timer: %s.", strerror(errno));
+        return -1;
+    }
+
+    its.it_value.tv_sec = 10; // Initial expiration after 10 seconds
+    its.it_value.tv_nsec = 0;
+    its.it_interval.tv_sec = 10; // Timer interval of 10 second
+    its.it_interval.tv_nsec = 0;
+
+    // Start the timer
+    if (timer_settime(timer_id, 0, &its, NULL) == -1)
+    {
+        log_error("Failed to start timer: %s.", strerror(errno));
+        return -1;
+    }
+
+    return 0;
 }
 
 int run_daemon()
@@ -457,6 +562,8 @@ int setup_signal_handlers()
         return -1;
     }
 
+    //signal(SIGPIPE, SIG_IGN);
+
     return 0;
 }
 
@@ -508,40 +615,72 @@ int setup_socket()
     return 0;
 }
 
-// int create_file()
-// {
-//     if (!file) {
-//         file = fopen(FILE_PATH, "a+");
-//         if (!file) {
-//             log_error("Failed to open file: %s", strerror(errno));
-//             return -1;
-//         }
-//     }
-
-//     return 0;
-// }
-
-int create_detached_thread(int client_sockfd)
+void init_threads()
 {
-    thread_info_t *thread_info = malloc(sizeof(thread_info_t));
-    if (!thread_info)
+    for (int i = 0; i < MAX_THREADS; i++) 
     {
-        log_error("Failed to allocate memory: %s", strerror(errno));
-        return -1;
+        thread_pool[i].thread_id = 0;
+        thread_pool[i].client_sockfd = -1;
+        atomic_init(&thread_pool[i].finished, true);
+    }
+}
+
+int create_thread(int client_sockfd)
+{
+    int retval = -1;
+    thread_info_t *available_thread = NULL;
+
+    for (int i = 0; i < MAX_THREADS; i++) 
+    {
+        if (thread_pool[i].thread_id != 0 && atomic_load(&thread_pool[i].finished)) 
+        {
+            available_thread = &thread_pool[i];
+            break;
+        }
+        if(thread_pool[i].thread_id == 0) {
+            available_thread = &thread_pool[i];
+            break;
+        }
     }
 
-    thread_info->client_sockfd = client_sockfd;
-    if (pthread_create(&thread_info->thread_id, NULL, handle_client, thread_info) != 0)
+    if (available_thread) 
     {
-        log_error("Failed to create thread: %s", strerror(errno));
-        free(thread_info);
-        return -1;
-    }
-    else
+        if(available_thread->thread_id)
+            pthread_join(available_thread->thread_id, NULL);
+        
+        available_thread->thread_id = 0;
+        available_thread->client_sockfd = client_sockfd;
+        atomic_store(&available_thread->finished, false);
+        if (pthread_create(&available_thread->thread_id, NULL, handle_client, available_thread) != 0)
+        {
+            log_error("Failed to create thread: %s", strerror(errno));
+        } 
+        else 
+        {
+            retval = 0;
+        }
+    } 
+    else 
     {
-        pthread_detach(thread_info->thread_id);
+        log_error("No available threads to handle client connection.");
     }
-    return 0;
+    
+
+    return retval;
+}
+
+void join_threads()
+{
+    for (int i = 0; i < MAX_THREADS; i++) 
+    {
+        if (thread_pool[i].thread_id) 
+        {
+            pthread_join(thread_pool[i].thread_id, NULL);
+            atomic_store(&thread_pool[i].finished, true);
+            thread_pool[i].client_sockfd = -1;
+            thread_pool[i].thread_id = 0;
+        }
+    }
 }
 
 int listen_socket()
@@ -582,6 +721,15 @@ int main(int argc, char *argv[])
 
     file_ref_init(&file_ref, FILE_PATH, "a+");
 
+#if !USE_AESD_CHAR_DEVICE
+    if(create_timer() < 0)
+    {
+        EXIT();
+    }
+#endif
+
+    init_threads();
+
     if (listen_socket() < 0)
     {
         EXIT();
@@ -604,14 +752,15 @@ int main(int argc, char *argv[])
 
         log_client_connection(&client_addr);
 
-        if (create_detached_thread(client_sockfd) < 0)
+        if (create_thread(client_sockfd) < 0)
         {
+            // drop the connection
             close(client_sockfd);
             continue;
         }
     }
 app_exit:
-
+    join_threads();
     cleanup_resources();
     return signal_received ? -1 : 0;
 }

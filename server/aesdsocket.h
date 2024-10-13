@@ -2,11 +2,13 @@
 #define AESDSOCKET_H__
 
 #include <stdbool.h>
+#include <stdatomic.h>
 
 typedef struct thread_info
 {
-    pthread_t thread_id;
-    int client_sockfd;
+    pthread_t thread_id; // only changed in main
+    int client_sockfd; // only changed in main
+    atomic_bool finished;
 } thread_info_t;
 
 
@@ -26,11 +28,11 @@ typedef struct file_ref
     pthread_mutex_t mutex;
 } file_ref_t;
 
+// ref-counted file reference that makes sure the file is closed when no longer in use
 void file_ref_init(file_ref_t* file_ref, const char *filename, const char *mode);
 FILE* file_ref_acquire(file_ref_t *file_ref);
 void file_ref_release(file_ref_t *file_ref);
 void file_ref_destroy(file_ref_t *file_ref);
-
 
 int setup_signal_handlers();
 int setup_syslog();
@@ -41,8 +43,11 @@ void log_signal(int signal);
 void log_client_connection(struct sockaddr_in* client_addr);
 
 // int create_file();
-int create_detached_thread();
+void init_threads();
+int create_thread();
+void join_threads();
 
+void handle_timer(union sigval sv);
 void handle_signal(int signal);
 void* handle_client(void *arg);
 int handle_ioctl_command(FILE* file, const char *cmd_str);
