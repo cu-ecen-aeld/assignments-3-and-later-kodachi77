@@ -2,11 +2,11 @@
 
 Based on the oops message below we can say the following:
 
-    1. Triggering event: null pointer dereferencing
-    2. Module: faulty
-    3. Memory abort information: `EC=0x25` (data abort) `FSC=0x05` (level 1 translation fault) - fault occurred because of a missing translation at the first level of the memory address translation tables.
-    4. `Call trace` shows the sequence of functions leading up to the Oops. Basically Oops happened inside the `faulty_write` function of the `faulty` module. The subsequent calls to `vfs_write` and `ksys_write` are part of the normal file system and syscall handling.
-    5. Code dump: The code dump shows the instructions that caused the Oops:
+ 1. Triggering event: null pointer dereferencing
+ 2. Module: faulty
+ 3. Memory abort information: `EC=0x25` (data abort) `FSC=0x05` (level 1 translation fault) - fault occurred because of a missing translation at the first level of the memory address translation tables.
+ 4. `Call trace` shows the sequence of functions leading up to the Oops. Basically Oops happened inside the `faulty_write` function of the `faulty` module. The subsequent calls to `vfs_write` and `ksys_write` are part of the normal file system and syscall handling.
+ 5. Code dump: The code dump shows the instructions that caused the Oops:
 
     Code: 91000000 95ff678c d2800001 d2800000 (b900003f)
 
