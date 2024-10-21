@@ -1,4 +1,4 @@
-# Fauly analysis
+# Faulty analysis
 
 Based on the oops message below we can say the following:
 
